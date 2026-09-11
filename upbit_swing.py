@@ -137,6 +137,24 @@ def calculate_volume_profile(df, bins=24):
         return low, high
 
 
+def fetch_market_names():
+    """업비트 KRW 시장의 한글/영문 종목명을 가져온다."""
+    try:
+        data = pyupbit.get_tickers(fiat="KRW", verbose=True)
+        if not isinstance(data, list):
+            return {}
+        return {
+            item.get("market", "").replace("KRW-", ""): {
+                "korean": item.get("korean_name", ""),
+                "english": item.get("english_name", ""),
+            }
+            for item in data
+            if item.get("market", "").startswith("KRW-")
+        }
+    except Exception:
+        return {}
+
+
 def fetch_top_krw_coins(limit=MAX_SCAN_COINS):
     """24시간 거래대금 기준으로 유동성이 높은 KRW 종목을 선별."""
     tickers = pyupbit.get_tickers(fiat="KRW")
@@ -470,33 +488,48 @@ def analyze_coin(coin, include_15m=True):
         else "재평가 필요"
     )
 
-    # 최종 추천: 점수보다 '진입 안전성'을 우선
-    if not four_hour_bullish:
-        decision = "관망 - 4H 추세 불충분"
-    elif one_hour_bearish:
-        decision = "매수 금지 - 1H 하락"
-    elif chase_blocked:
-        decision = "추격매수 금지 - 눌림 대기"
-    elif rr1 < MIN_RR1 or rr2 < MIN_RR2:
-        decision = "관망 - R:R 부족"
-    elif a15 is not None and not a15["bullish"]:
-        decision = "관심 - 15분 반등 확인 대기"
-    elif total_score >= 14 and one_hour_bullish and not chase_warning:
-        decision = "매수 후보"
-    elif total_score >= 10 and one_hour_bullish:
-        decision = "관심 - 눌림 확인"
+    # 5~14일 상승 가능성 순위용 내부 점수
+    horizon_score = 0.0
+    horizon_score += 3.0 if four_hour_bullish else -3.0
+    horizon_score += 2.0 if one_hour_bullish else -2.0
+    horizon_score += 1.5 if (a15 is not None and a15["bullish"]) else 0.0
+    horizon_score += min(max(total_score, 0), 16) * 0.35
+    horizon_score -= max(0.0, a1["distance_ma20"] - 0.03) * 20
+    horizon_score -= max(0.0, a1["surge_6h"] - 0.05) * 12
+    horizon_score -= max(0.0, a1["atr_pct"] - 0.06) * 10
+    if rr1 >= MIN_RR1 and rr2 >= MIN_RR2:
+        horizon_score += 1.5
+
+    # 눈에 띄는 4단계 판단 + 관망.
+    # 매도 판단은 보유자 기준의 기술적 약세 신호이며 자동매도 기능은 없다.
+    if one_hour_bearish and not four_hour_bullish:
+        decision = "매도추천"
+    elif (one_hour_bearish or a1["rsi"] >= 75 or
+          (a1["macd"] < a1["macd_signal"] and a1["hist"] < 0)):
+        decision = "매도검토"
+    elif four_hour_bullish and one_hour_bullish and not chase_blocked and rr1 >= MIN_RR1 and rr2 >= MIN_RR2:
+        if entry_low <= price <= entry_high and (a15 is None or a15["bullish"]):
+            decision = "매수추천"
+        else:
+            decision = "매수검토"
+    elif four_hour_bullish and one_hour_bullish:
+        decision = "매수검토"
     else:
         decision = "관망"
 
-    # 현재가가 진입구간 안이어도 '매수 후보'로 표시하지 않는다.
-    if decision == "매수 후보" and price > entry_high:
-        decision = "매수 대기 - 눌림 필요"
+    # 급등 추격 상태에서는 매수추천을 허용하지 않는다.
+    if chase_blocked and decision in ("매수추천", "매수검토"):
+        decision = "매수검토"
+        horizon_score -= 3
 
-    holding = "3~7일" if total_score >= 14 else "4~10일" if total_score >= 10 else "관망"
+    holding = "5~14일" if horizon_score >= 5 else "관망"
 
     return {
         "coin": coin,
+        "korean_name": coin,
+        "english_name": coin,
         "price": price,
+        "horizon_score": horizon_score,
         "score4": a4["score"],
         "score1": a1["score"],
         "total_score": total_score,
@@ -548,6 +581,7 @@ def analyze_coin(coin, include_15m=True):
 
 def scan_market(max_coins=MAX_SCAN_COINS):
     coins = fetch_top_krw_coins(max_coins)
+    names = fetch_market_names()
     results = []
     errors = []
 
@@ -555,31 +589,23 @@ def scan_market(max_coins=MAX_SCAN_COINS):
         try:
             result = analyze_coin(coin)
             if result:
+                name = names.get(coin, {})
+                result["korean_name"] = name.get("korean") or coin
+                result["english_name"] = name.get("english") or coin
                 results.append(result)
         except Exception as exc:
             errors.append(f"{coin}: {exc}")
 
-    # 매수 가능성을 최우선으로, 점수는 2순위
-    priority = {
-        "매수 후보": 0,
-        "관심 - 눌림 확인": 1,
-        "매수 대기 - 눌림 필요": 2,
-        "관심 - 15분 반등 확인 대기": 3,
-        "관망 - R:R 부족": 4,
-        "추격매수 금지 - 눌림 대기": 5,
-        "매수 금지 - 1H 하락": 6,
-        "관망 - 4H 추세 불충분": 7,
-        "관망": 8,
-        "재평가 필요": 9,
-    }
-    results.sort(key=lambda r: (priority.get(r["decision"], 99), -r["total_score"]))
+    # 5~14일 상승 가능성 순으로 정렬하되, 매도 신호는 아래로 보낸다.
+    decision_priority = {"매수추천": 0, "매수검토": 1, "관망": 2, "매도검토": 3, "매도추천": 4}
+    results.sort(key=lambda r: (decision_priority.get(r["decision"], 9), -r["horizon_score"]))
     return results, errors
 
 
 def run_analysis():
     print("=" * 90)
     print("업비트 스윙 분석기 V3.2")
-    print("목표: 3~10일 / 눌림 진입 / 급등 추격매수 차단")
+    print("목표: 오늘 매수 기준 5~14일 상승 가능성 순위 / 눌림 진입 / 급등 추격매수 차단")
     print(datetime.now().strftime("분석시간: %Y-%m-%d %H:%M:%S"))
     print("=" * 90)
 
@@ -592,9 +618,8 @@ def run_analysis():
     print("\n★ 오늘의 우선 후보")
     for i, r in enumerate(results[:10], 1):
         print(
-            f"{i:>2}. {r['coin']:<8} "
-            f"{r['decision']:<24} "
-            f"점수 {r['total_score']:>3}  "
+            f"{i:>2}. {r['korean_name']}({r['english_name']}) "
+            f"{r['decision']:<8} "
             f"현재 {krw(r['price'])}  "
             f"진입 {krw(r['entry_low'])}~{krw(r['entry_high'])}"
         )

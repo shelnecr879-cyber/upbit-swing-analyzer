@@ -3,37 +3,17 @@ import pandas as pd
 from datetime import datetime
 import upbit_swing
 
-st.set_page_config(
-    page_title="업비트 스윙 분석기 V3",
-    page_icon="📈",
-    layout="wide",
-)
+st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
+st.title("📈 업비트 스윙 분석기 — 오전 11시 / 5~14일 상승순위")
+st.caption("오늘 매수한다고 가정했을 때 앞으로 5~14일의 상승 가능성을 기술적으로 비교 · 점수는 화면에 표시하지 않습니다.")
 
-st.title("📈 업비트 스윙 분석기 V3.2 — 오전 11시 추천")
-st.caption("매일 오전 11시 기준 · 10~15개 상위 후보 · 눌림 진입 우선 · 급등 추격매수 강력 차단")
-
-st.info(
-    "V3는 점수가 높아도 급등·과열·R:R 부족이면 신규 매수를 막습니다. "
-    "추천이 없으면 '추천할 코인이 없는 것'이 정상입니다."
-)
+st.info("🕚 매일 오전 11시 기준 분석을 권장합니다. '매수추천'은 현재 진입 조건이 맞는 종목, '매수검토'는 좋은 후보지만 눌림/반등 확인이 필요한 종목입니다. '매도추천/매도검토'는 보유자 기준의 기술적 약세 신호입니다.")
 
 col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
-    max_coins = st.slider(
-        "전체 시장에서 먼저 분석할 상위 거래대금 코인 수",
-        min_value=20,
-        max_value=40,
-        value=40,
-        step=5,
-    )
+    max_coins = st.slider("먼저 분석할 상위 거래대금 종목 수", 20, 40, 40, 5)
 with col2:
-    display_count = st.slider(
-        "화면에 보여줄 후보 수",
-        min_value=10,
-        max_value=15,
-        value=15,
-        step=1,
-    )
+    display_count = st.slider("보여줄 종목 수", 10, 15, 15, 1)
 with col3:
     refresh = st.button("🔄 오전 11시 추천 새로 분석", use_container_width=True)
 
@@ -50,9 +30,9 @@ with st.spinner("업비트 데이터를 분석하는 중입니다..."):
 now = datetime.now()
 st.caption("분석시간: " + now.strftime("%Y-%m-%d %H:%M:%S"))
 if now.hour == 11:
-    st.success("🕚 현재 오전 11시 분석 시간대입니다. 아래 결과를 오늘의 우선 후보로 확인하세요.")
+    st.success("🕚 현재 오전 11시 분석 시간대입니다.")
 else:
-    st.info("🕚 권장 분석 시간은 매일 오전 11시입니다. 지금 분석 버튼을 누르면 현재 시점 데이터로 다시 계산합니다.")
+    st.info("🕚 권장 분석 시간은 매일 오전 11시입니다. 지금 분석하면 현재 시점 데이터로 다시 계산합니다.")
 
 if errors:
     with st.expander(f"일부 분석 오류 {len(errors)}건"):
@@ -62,139 +42,97 @@ if not results:
     st.error("분석 결과를 가져오지 못했습니다.")
     st.stop()
 
-# -------------------------------
-# 추천 후보
-# -------------------------------
-buy_candidates = [r for r in results if r["decision"] == "매수 후보"]
-waiting = [
-    r for r in results
-    if r["decision"] in [
-        "매수 대기 - 눌림 필요",
-        "관심 - 눌림 확인",
-        "관심 - 15분 반등 확인 대기",
-    ]
-]
+buy_recommend = [r for r in results if r["decision"] == "매수추천"]
+buy_review = [r for r in results if r["decision"] == "매수검토"]
+sell_review = [r for r in results if r["decision"] == "매도검토"]
+sell_recommend = [r for r in results if r["decision"] == "매도추천"]
 
-a, b, c, d = st.columns(4)
-a.metric("분석 종목", f"{len(results)}개")
-b.metric("매수 후보", f"{len(buy_candidates)}개")
-c.metric("눌림/확인 대기", f"{len(waiting)}개")
-d.metric("추격 차단", f"{sum(r['chase_blocked'] for r in results)}개")
-
-if buy_candidates:
-    best = buy_candidates[0]
-    st.success(
-        f"★ 1순위: {best['coin']} | {best['decision']} | "
-        f"점수 {best['total_score']}점"
-    )
-else:
-    st.warning("현재는 신규 진입을 서두를 확실한 후보가 없습니다.")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("매수추천", f"{len(buy_recommend)}개")
+m2.metric("매수검토", f"{len(buy_review)}개")
+m3.metric("매도검토", f"{len(sell_review)}개")
+m4.metric("매도추천", f"{len(sell_recommend)}개")
 
 st.divider()
+st.subheader(f"📊 오늘 매수 기준 5~14일 상승 가능성 TOP {display_count}")
+st.caption("순위는 4H 추세, 1H 구조, 15분 반등, 눌림 위치, R:R, 최근 급등/변동성을 종합해 상대적으로 비교한 기술적 순위입니다. 미래 수익을 보장하는 예측값은 아닙니다.")
 
-# -------------------------------
-# 상위 10~15개 후보
-# -------------------------------
 display_results = results[:display_count]
-st.subheader(f"오늘의 스윙 후보 TOP {len(display_results)}")
-st.caption("주의: 후보 수를 채우기 위해 매수 금지 종목을 좋은 종목처럼 추천하지 않습니다. 실제 매수 후보와 눌림 대기 종목을 구분해서 보세요.")
-
 rows = []
 for i, r in enumerate(display_results, 1):
     rows.append({
         "순위": i,
-        "코인": r["coin"],
-        "상태": r["decision"],
-        "점수": r["total_score"],
-        "4H": r["score4"],
-        "1H": r["score1"],
-        "현재가": r["price"],
-        "진입구간": f"{r['entry_low']:.6g} ~ {r['entry_high']:.6g}",
-        "손절": r["stop"],
-        "1차": r["target1"],
-        "2차": r["target2"],
-        "R:R": f"{r['rr1']:.2f} / {r['rr2']:.2f}",
-        "20선이격": f"{r['distance_ma20']:+.1f}%",
-        "6시간상승": f"{r['surge_6h']:+.1f}%",
-        "거래량": f"{r['volume_ratio']:.1f}배",
-        "15m": "확인" if r["15m_bullish"] else "대기",
+        "코인": f"{r['korean_name']} ({r['english_name']})",
+        "판단": r["decision"],
+        "현재가": upbit_swing.krw(r["price"]),
+        "매수관심구간": f"{upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])}",
+        "손절": upbit_swing.krw(r["stop"]),
+        "1차목표": upbit_swing.krw(r["target1"]),
+        "2차목표": upbit_swing.krw(r["target2"]),
+        "예상보유": r["holding"],
+        "5~14일": "상승 우선" if r["horizon_score"] >= 5 else "신중",
     })
+st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-st.dataframe(
-    pd.DataFrame(rows),
-    use_container_width=True,
-    hide_index=True,
-)
+# 매수추천을 별도로 눈에 띄게
+if buy_recommend:
+    st.success("🟢 오늘의 매수추천")
+    for i, r in enumerate(buy_recommend[:5], 1):
+        st.write(f"**{i}. {r['korean_name']} ({r['english_name']})** — 현재 {upbit_swing.krw(r['price'])} · 매수관심구간 {upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])} · 5~14일 관점")
+else:
+    st.warning("오늘은 현재 조건에 맞는 '매수추천' 종목이 없습니다. 매수검토 종목의 눌림/반등을 기다리는 것이 우선입니다.")
 
-# -------------------------------
-# 상세
-# -------------------------------
+st.divider()
 st.subheader("종목별 상세 판단")
-
 for r in display_results:
-    with st.expander(
-        f"{r['coin']} · {r['decision']} · {r['total_score']}점",
-        expanded=(r in buy_candidates[:2]),
-    ):
+    title = f"{r['korean_name']} ({r['english_name']}) · {r['decision']}"
+    with st.expander(title, expanded=(r["decision"] == "매수추천")):
         x1, x2, x3, x4 = st.columns(4)
         x1.metric("현재가", upbit_swing.krw(r["price"]))
         x2.metric("권장 진입가", upbit_swing.krw(r["entry_price"]))
         x3.metric("손절", upbit_swing.krw(r["stop"]))
-        x4.metric("1H 거래량", f"{r['volume_ratio']:.2f}배")
+        x4.metric("예상 보유", r["holding"])
 
-        st.write(
-            f"**진입 관심구간:** "
-            f"{upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])}"
-        )
-        st.write(
-            f"**목표:** 1차 {upbit_swing.krw(r['target1'])} / "
-            f"2차 {upbit_swing.krw(r['target2'])}"
-        )
-        st.write(
-            f"**R:R:** 1차 {r['rr1']:.2f} / 2차 {r['rr2']:.2f} · "
-            f"**20선 이격:** {r['distance_ma20']:+.1f}% · "
-            f"**최근 6시간:** {r['surge_6h']:+.1f}%"
-        )
+        st.write(f"**판단:** {r['decision']}")
+        st.write(f"**5~14일 상승순위:** {display_results.index(r)+1}위")
+        st.write(f"**매수 관심구간:** {upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])}")
+        st.write(f"**목표:** 1차 {upbit_swing.krw(r['target1'])} / 2차 {upbit_swing.krw(r['target2'])}")
+        st.write(f"**R:R:** 1차 {r['rr1']:.2f} / 2차 {r['rr2']:.2f}")
 
-        if r["chase_blocked"]:
-            st.error("🚫 추격매수 차단: 현재 가격을 따라가서 매수하지 않도록 설계됨.")
+        if r["decision"] in ("매도추천", "매도검토"):
+            st.error("📉 보유 중인 경우 매도/비중축소를 검토할 수 있는 기술적 약세 신호입니다. 자동매도는 하지 않습니다.")
+        elif r["chase_blocked"]:
+            st.warning("🚫 현재 가격 추격매수는 차단합니다. 눌림 진입을 우선하세요.")
         elif r["chase_warning"]:
-            st.warning("⚠️ 추격매수 주의: 눌림 진입을 우선 확인하세요.")
+            st.warning("⚠️ 급등 추격 주의: 눌림 후 진입을 우선하세요.")
 
         if r["four_hour_bullish"]:
             st.success("4H: 상승 구조")
         else:
             st.warning("4H: 상승 구조 미확인")
-
         if r["one_hour_bearish"]:
             st.error("1H: 하락 구조")
         elif r["one_hour_bullish"]:
             st.success("1H: 상승 구조")
         else:
             st.warning("1H: 방향 확인 필요")
-
         if r["15m_bullish"]:
             st.success("15m: 단기 반등 확인")
         else:
-            st.info("15m: 아직 반등 확인 전")
+            st.info("15m: 반등 확인 전")
 
         ind = pd.DataFrame([
             {"항목": "RSI", "4H": r["rsi4"], "1H": r["rsi1"], "15m": r["rsi15"]},
             {"항목": "MA20", "4H": r["ma20_4"], "1H": r["ma20_1"], "15m": None},
             {"항목": "MA60", "4H": r["ma60_4"], "1H": r["ma60_1"], "15m": None},
-            {"항목": "MACD", "4H": r["macd4"], "1H": r["macd1"], "15m": None},
         ])
         st.dataframe(ind, use_container_width=True, hide_index=True)
 
         st.markdown("**판단 근거 — 4H**")
         for reason in r["reasons4"]:
             st.write("• " + reason)
-
         st.markdown("**판단 근거 — 1H**")
         for reason in r["reasons1"]:
             st.write("• " + reason)
 
-st.warning(
-    "주의: 이 프로그램은 자동매매가 아닌 기술적 분석 보조 도구입니다. "
-    "매수/매도 판단을 보장하지 않으며, 손실 가능성이 있습니다."
-)
+st.warning("주의: 이 프로그램은 자동매매가 아닌 기술적 분석 보조 도구입니다. '5~14일 상승순위'는 기술적 조건을 이용한 상대 순위이며 수익을 보장하지 않습니다.")
