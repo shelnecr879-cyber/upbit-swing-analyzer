@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📈 업비트 스윙 분석기 V3.1 — 오전 11시 추천")
+st.title("📈 업비트 스윙 분석기 V3.2 — 오전 11시 추천")
 st.caption("매일 오전 11시 기준 · 10~15개 상위 후보 · 눌림 진입 우선 · 급등 추격매수 강력 차단")
 
 st.info(

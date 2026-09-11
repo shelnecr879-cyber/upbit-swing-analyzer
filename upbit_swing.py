@@ -7,7 +7,7 @@ import pyupbit
 
 
 # ============================================================
-# 업비트 스윙 분석기 V3
+# 업비트 스윙 분석기 V3.2
 # 목적: 3~10일 스윙 / 눌림 진입 / 추격매수 차단
 #
 # V3 핵심 변경
@@ -447,10 +447,10 @@ def analyze_coin(coin, include_15m=True):
     support = max(support_candidates) if support_candidates else price * 0.94
 
     technical_stop = support * 0.97
-    max_stop = entry_price * (1 - DEFAULT_STOP)
+    max_stop = entry_price * (1 - DEFAULT_STOP_PCT)
     stop = min(technical_stop, max_stop)
     if stop <= 0 or stop >= entry_price:
-        stop = entry_price * (1 - DEFAULT_STOP)
+        stop = entry_price * (1 - DEFAULT_STOP_PCT)
 
     target1 = entry_price * (1 + TARGET1_PCT)
     target2 = entry_price * (1 + TARGET2_PCT)
@@ -578,7 +578,7 @@ def scan_market(max_coins=MAX_SCAN_COINS):
 
 def run_analysis():
     print("=" * 90)
-    print("업비트 스윙 분석기 V3")
+    print("업비트 스윙 분석기 V3.2")
     print("목표: 3~10일 / 눌림 진입 / 급등 추격매수 차단")
     print(datetime.now().strftime("분석시간: %Y-%m-%d %H:%M:%S"))
     print("=" * 90)
