@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import upbit_swing
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
-st.title("📈 업비트 스윙 분석기 — 오전 11시 / 5~14일 상승순위")
+st.title("📈 업비트 스윙 분석기 V3.4 — 오전 11시 / 5~14일 상승순위")
 st.caption("오늘 매수한다고 가정했을 때 앞으로 5~14일의 상승 가능성을 기술적으로 비교 · 점수는 화면에 표시하지 않습니다.")
 
 st.info("🕚 매일 오전 11시 기준 분석을 권장합니다. '매수추천'은 현재 진입 조건이 맞는 종목, '매수검토'는 좋은 후보지만 눌림/반등 확인이 필요한 종목입니다. '매도추천/매도검토'는 보유자 기준의 기술적 약세 신호입니다.")
@@ -27,8 +28,8 @@ if refresh:
 with st.spinner("업비트 데이터를 분석하는 중입니다..."):
     results, errors = get_results(max_coins)
 
-now = datetime.now()
-st.caption("분석시간: " + now.strftime("%Y-%m-%d %H:%M:%S"))
+now = datetime.now(ZoneInfo("Asia/Seoul"))
+st.caption("분석시간(KST): " + now.strftime("%Y-%m-%d %H:%M:%S"))
 if now.hour == 11:
     st.success("🕚 현재 오전 11시 분석 시간대입니다.")
 else:
@@ -105,6 +106,15 @@ for r in display_results:
             st.warning("🚫 현재 가격 추격매수는 차단합니다. 눌림 진입을 우선하세요.")
         elif r["chase_warning"]:
             st.warning("⚠️ 급등 추격 주의: 눌림 후 진입을 우선하세요.")
+
+        if r.get("support_break_4h"):
+            st.error(f"🔴 4H 지지선 {upbit_swing.krw(r['support4'])} 이탈 + 거래량 증가: 강한 하락 신호")
+        elif r.get("support_break_1h"):
+            st.warning(f"🟠 1H 지지선 {upbit_swing.krw(r['support'])} 이탈 + 거래량 증가: 매도검토")
+        elif r.get("false_break_1h"):
+            st.success(f"🟢 지지선 {upbit_swing.krw(r['support'])} 하회 후 회복: 가짜 이탈 가능성, 반등 확인")
+        else:
+            st.info(f"지지선: 1H {upbit_swing.krw(r['support'])} / 4H {upbit_swing.krw(r['support4'])}")
 
         if r["four_hour_bullish"]:
             st.success("4H: 상승 구조")

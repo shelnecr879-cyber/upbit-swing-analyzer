@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -7,7 +8,7 @@ import pyupbit
 
 
 # ============================================================
-# 업비트 스윙 분석기 V3.2
+# 업비트 스윙 분석기 V3.4
 # 목적: 3~10일 스윙 / 눌림 진입 / 추격매수 차단
 #
 # V3 핵심 변경
@@ -459,10 +460,46 @@ def analyze_coin(coin, include_15m=True):
     )
     entry_price = (entry_low + entry_high) / 2
 
-    # 지지선
-    support_candidates = [a1["recent_low"], a1["zone_low"], a1["ma60"]]
+    # 지지선: 현재 진행 중인 캔들은 제외하고 최근 지지 후보를 계산한다.
+    # 이렇게 해야 "잠깐 저가를 찍은 것"과 "확정 이탈"을 구분하기 쉽다.
+    prior1 = df1.iloc[:-2] if len(df1) >= 52 else df1.iloc[:-1]
+    prior_recent_low = float(prior1["low"].tail(50).min()) if not prior1.empty else a1["recent_low"]
+    prior_zone_low, _ = calculate_volume_profile(prior1.tail(150)) if len(prior1) >= 20 else (a1["zone_low"], a1["zone_high"])
+    support_candidates = [prior_recent_low, prior_zone_low, a1["ma60"]]
     support_candidates = [x for x in support_candidates if 0 < x < price]
     support = max(support_candidates) if support_candidates else price * 0.94
+
+    # "2.15원 이탈" 같은 상황을 자동 감지하기 위한 확인 신호.
+    # 마지막 완성 1H/4H 봉의 종가가 지지 아래에 있고 거래량이 증가했을 때만 강한 이탈로 본다.
+    c1 = df1.iloc[-2]
+    c1_prev = df1.iloc[-3]
+    vol_ma1 = float(df1["volume"].rolling(20).mean().iloc[-2])
+    closed_1h_volume_ratio = float(c1["volume"] / vol_ma1) if vol_ma1 > 0 else 0.0
+    support_break_1h = (
+        float(c1["close"]) < support * 0.995
+        and float(c1["low"]) < support * 0.99
+        and closed_1h_volume_ratio >= 1.5
+    )
+    false_break_1h = (
+        float(c1["low"]) < support * 0.995
+        and float(c1["close"]) >= support
+    )
+
+    df4_prior = df4.iloc[:-2] if len(df4) >= 52 else df4.iloc[:-1]
+    support4_candidates = [
+        float(df4_prior["low"].tail(30).min()) if not df4_prior.empty else a4["price"] * 0.94,
+        float(a4["ma60"]),
+    ]
+    support4_candidates = [x for x in support4_candidates if 0 < x < a4["price"]]
+    support4 = max(support4_candidates) if support4_candidates else a4["price"] * 0.94
+    c4 = df4.iloc[-2]
+    vol_ma4 = float(df4["volume"].rolling(20).mean().iloc[-2])
+    closed_4h_volume_ratio = float(c4["volume"] / vol_ma4) if vol_ma4 > 0 else 0.0
+    support_break_4h = (
+        float(c4["close"]) < support4 * 0.995
+        and float(c4["low"]) < support4 * 0.99
+        and closed_4h_volume_ratio >= 1.3
+    )
 
     technical_stop = support * 0.97
     max_stop = entry_price * (1 - DEFAULT_STOP_PCT)
@@ -497,16 +534,29 @@ def analyze_coin(coin, include_15m=True):
     horizon_score -= max(0.0, a1["distance_ma20"] - 0.03) * 20
     horizon_score -= max(0.0, a1["surge_6h"] - 0.05) * 12
     horizon_score -= max(0.0, a1["atr_pct"] - 0.06) * 10
+    if false_break_1h:
+        horizon_score += 0.8
+    if support_break_1h:
+        horizon_score -= 3.0
+    if support_break_4h:
+        horizon_score -= 5.0
     if rr1 >= MIN_RR1 and rr2 >= MIN_RR2:
         horizon_score += 1.5
 
     # 눈에 띄는 4단계 판단 + 관망.
+    # 지지선 이탈은 가격만이 아니라 "완성 봉 종가 + 거래량"을 함께 확인한다.
     # 매도 판단은 보유자 기준의 기술적 약세 신호이며 자동매도 기능은 없다.
-    if one_hour_bearish and not four_hour_bullish:
+    if support_break_4h:
+        decision = "매도추천"
+    elif support_break_1h and not false_break_1h:
+        decision = "매도검토"
+    elif one_hour_bearish and not four_hour_bullish:
         decision = "매도추천"
     elif (one_hour_bearish or a1["rsi"] >= 75 or
           (a1["macd"] < a1["macd_signal"] and a1["hist"] < 0)):
         decision = "매도검토"
+    elif false_break_1h or (price <= support * 1.02 and not support_break_1h and not support_break_4h):
+        decision = "반등대기"
     elif four_hour_bullish and one_hour_bullish and not chase_blocked and rr1 >= MIN_RR1 and rr2 >= MIN_RR2:
         if entry_low <= price <= entry_high and (a15 is None or a15["bullish"]):
             decision = "매수추천"
@@ -551,7 +601,13 @@ def analyze_coin(coin, include_15m=True):
         "volume_ratio": a1["volume_ratio"],
         "atr_pct": a1["atr_pct"] * 100,
         "support": support,
+        "support4": support4,
         "resistance": recent_high,
+        "closed_1h_volume_ratio": closed_1h_volume_ratio,
+        "closed_4h_volume_ratio": closed_4h_volume_ratio,
+        "support_break_1h": support_break_1h,
+        "support_break_4h": support_break_4h,
+        "false_break_1h": false_break_1h,
         "zone_low": a1["zone_low"],
         "zone_high": a1["zone_high"],
         "entry_low": entry_low,
@@ -597,7 +653,7 @@ def scan_market(max_coins=MAX_SCAN_COINS):
             errors.append(f"{coin}: {exc}")
 
     # 5~14일 상승 가능성 순으로 정렬하되, 매도 신호는 아래로 보낸다.
-    decision_priority = {"매수추천": 0, "매수검토": 1, "관망": 2, "매도검토": 3, "매도추천": 4}
+    decision_priority = {"매수추천": 0, "매수검토": 1, "반등대기": 2, "관망": 3, "매도검토": 4, "매도추천": 5}
     results.sort(key=lambda r: (decision_priority.get(r["decision"], 9), -r["horizon_score"]))
     return results, errors
 
@@ -606,7 +662,7 @@ def run_analysis():
     print("=" * 90)
     print("업비트 스윙 분석기 V3.2")
     print("목표: 오늘 매수 기준 5~14일 상승 가능성 순위 / 눌림 진입 / 급등 추격매수 차단")
-    print(datetime.now().strftime("분석시간: %Y-%m-%d %H:%M:%S"))
+    print(datetime.now(ZoneInfo("Asia/Seoul")).strftime("분석시간(KST): %Y-%m-%d %H:%M:%S"))
     print("=" * 90)
 
     results, errors = scan_market()
