@@ -3,6 +3,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
+
+APP_VERSION = "3.4.1"
 import pandas as pd
 import pyupbit
 

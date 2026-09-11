@@ -5,8 +5,15 @@ from zoneinfo import ZoneInfo
 import upbit_swing
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
-st.title("📈 업비트 스윙 분석기 V3.4 — 오전 11시 / 5~14일 상승순위")
+st.title("📈 업비트 스윙 분석기 V3.4.1 — 오전 11시 / 5~14일 상승순위")
 st.caption("오늘 매수한다고 가정했을 때 앞으로 5~14일의 상승 가능성을 기술적으로 비교 · 점수는 화면에 표시하지 않습니다.")
+
+# 배포 캐시/파일 불일치 방지: 최신 분석 모듈이 아니면 명확한 안내를 표시합니다.
+MODULE_VERSION = getattr(upbit_swing, "APP_VERSION", None)
+if MODULE_VERSION != "3.4.1":
+    st.error("⚠️ 분석 모듈이 최신 버전으로 올라오지 않았습니다. GitHub에서 upbit_swing.py와 streamlit_app.py를 함께 교체한 뒤 Streamlit Cloud의 Reboot app을 실행하세요.")
+    st.caption(f"현재 모듈 버전: {MODULE_VERSION or '구버전'} / 필요 버전: 3.4.1")
+    st.stop()
 
 st.info("🕚 매일 오전 11시 기준 분석을 권장합니다. '매수추천'은 현재 진입 조건이 맞는 종목, '매수검토'는 좋은 후보지만 눌림/반등 확인이 필요한 종목입니다. '매도추천/매도검토'는 보유자 기준의 기술적 약세 신호입니다.")
 
