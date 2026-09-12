@@ -7,26 +7,13 @@ st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", la
 
 st.title("📈 업비트 4H + 1H 스윙 분석기")
 st.caption("목표: 3~10일 보유 / 주 1~2회 선별 · KRW 시장")
-st.success("🔄 사이트 접속 또는 새로고침 때마다 업비트 최신 데이터로 재분석합니다. 예약 갱신 시간은 없습니다.")
 
-DEFAULT_COINS = [
-    "BTC", "ETH", "XRP", "DOGE", "SOL", "ADA", "AVAX", "LINK",
-    "DOT", "TRX", "SUI", "APT", "ARB", "OP", "NEAR", "ATOM",
-    "ETC", "BCH", "LTC", "EOS", "STX", "SEI", "IMX", "INJ",
-    "PEPE", "BONK", "WIF", "SHIB", "HBAR", "ONDO", "RENDER"
-]
-
+DEFAULT_COINS = ["WLD", "QKC", "DOOD", "SOPH"]
 AVAILABLE_COINS = list(getattr(upbit_swing, "COINS", DEFAULT_COINS))
-
-coins = st.multiselect(
-    "분석 코인",
-    options=AVAILABLE_COINS,
-    default=AVAILABLE_COINS
-)
+coins = st.multiselect("분석 코인", AVAILABLE_COINS, default=AVAILABLE_COINS)
 refresh = st.button("🔄 지금 분석")
 
-# 접속/새로고침 때마다 최신 업비트 데이터를 가져오도록 캐시를 사용하지 않습니다.
-
+@st.cache_data(ttl=300, show_spinner=False)
 def get_results(selected):
     results = []
     for coin in selected:
@@ -38,7 +25,7 @@ def get_results(selected):
             st.warning(f"{coin} 분석 오류: {e}")
     return sorted(results, key=lambda x: x["total_score"], reverse=True)
 
-if True:
+if refresh or True:
     with st.spinner("업비트 데이터를 분석하는 중입니다..."):
         results = get_results(tuple(coins))
 
@@ -65,11 +52,16 @@ if True:
             "점수": r["total_score"],
             "4H": r["score4"],
             "1H": r["score1"],
+            "일봉": r["daily_score"],
             "현재가": r["price"],
             "진입구간": f"{r['entry_low']:.4g} ~ {r['entry_high']:.4g}",
             "손절": r["stop"],
             "1차 목표": r["target1"],
             "2차 목표": r["target2"],
+            "일봉 추세": "상승" if r["daily_bullish"] else "하락/중립",
+            "전고점 돌파": "확인" if r["daily_breakout"] else "없음",
+            "지지 확인": "확인" if r["daily_support_confirmed"] else "대기",
+            "고점 추격 위험": "제외" if r["daily_overextended"] else "정상",
             "1H 추세": "상승 확인" if r["one_hour_bullish"] else ("하락 확인" if r["one_hour_bearish"] else "중립"),
             "추천": r["decision"],
         })
@@ -86,6 +78,13 @@ if True:
             st.write(f"**진입 관심구간:** {upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])}")
             st.write(f"**목표:** 1차 {upbit_swing.krw(r['target1'])} / 2차 {upbit_swing.krw(r['target2'])}")
             st.write(f"**R:R:** 1차 {r['rr1']:.2f} / 2차 {r['rr2']:.2f}")
+            st.markdown("### 일봉 필터")
+            st.write(f"**일봉 추세:** {'상승' if r['daily_bullish'] else '하락/중립'}")
+            st.write(f"**거래량 동반 전고점 돌파:** {'확인' if r['daily_breakout'] else '없음'}")
+            st.write(f"**돌파 후 지지 확인:** {'확인' if r['daily_support_confirmed'] else '대기'}")
+            st.write(f"**급등 후 고점 추격 위험:** {'추천 제외' if r['daily_overextended'] else '없음'}")
+            st.write(f"**일봉 거래량:** {r['daily_volume_ratio']:.2f}배")
+            st.write(f"**전고점 기준:** {upbit_swing.krw(r['daily_prior_high'])}")
 
             st.markdown("### 1H 추세 확인")
             if r["one_hour_bullish"]:
@@ -95,13 +94,16 @@ if True:
             else:
                 st.warning("1H 상승 추세가 아직 확인되지 않았습니다. 신규 매수는 기다립니다.")
 
-            st.markdown("### 4H / 1H 지표")
+            st.markdown("### 4H / 1H / 일봉 지표")
             ind = pd.DataFrame([
                 {"항목":"RSI", "4H":r["rsi4"], "1H":r["rsi1"]},
                 {"항목":"MA20", "4H":r["ma20_4"], "1H":r["ma20_1"]},
                 {"항목":"MA60", "4H":r["ma60_4"], "1H":r["ma60_1"]},
                 {"항목":"MACD", "4H":r["macd4"], "1H":r["macd1"]},
                 {"항목":"MACD Signal", "4H":r["macd4_signal"], "1H":r["macd1_signal"]},
+                {"항목":"일봉 MA20", "4H":"", "1H":r["daily_ma20"]},
+                {"항목":"일봉 MA60", "4H":"", "1H":r["daily_ma60"]},
+                {"항목":"일봉 RSI", "4H":"", "1H":r["daily_rsi"]},
             ])
             st.dataframe(ind, use_container_width=True, hide_index=True)
 
