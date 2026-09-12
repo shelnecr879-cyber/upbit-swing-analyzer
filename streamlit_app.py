@@ -21,7 +21,7 @@ st.caption(f"분석 대상: KRW 전체 마켓 중 24시간 거래대금 {MIN_TRA
 # 업비트 코인 코드와 한글명 매칭
 COIN_NAMES = {}
 try:
-    for item in pyupbit.get_market_all(fiat="KRW"):
+    for item in pyupbit.get_market_all():
         market = item.get("market", "")
         if market.startswith("KRW-"):
             code = market.replace("KRW-", "")
