@@ -41,13 +41,21 @@ if refresh or True:
         st.stop()
 
     # 요약 카드
-    cols = st.columns(len(results))
-    for col, r in zip(cols, results):
-        col.metric(f"{r['coin']} · {r['total_score']}점", upbit_swing.krw(r['price']))
-        col.write(r['decision'])
+    # 전체 코인을 가로로 펼치면 화면이 깨지므로 상위 6개만 카드로 표시합니다.
+    st.subheader("상위 스윙 후보")
+    top_results = results[:6]
+    cols = st.columns(min(len(top_results), 3))
+    for i, r in enumerate(top_results):
+        col = cols[i % len(cols)]
+        with col:
+            st.metric(
+                f"{r['coin']} · {r['total_score']}점",
+                upbit_swing.krw(r['price'])
+            )
+            st.caption(r["decision"])
 
     st.divider()
-    st.subheader("오늘의 스윙 후보")
+    st.subheader("전체 분석 결과")
 
     rows = []
     for i, r in enumerate(results, 1):
