@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import upbit_swing
@@ -19,17 +19,65 @@ upbit_swing.COINS = AVAILABLE_COINS
 st.caption(f"분석 대상: KRW 전체 마켓 중 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
 
 # 업비트 코인 코드와 한글명 매칭
-COIN_NAMES = {}
+# API 응답이 늦거나 한글명이 비어도 화면에 한글명이 나오도록 기본명을 함께 사용합니다.
+COIN_NAMES = {
+    "BTC": "비트코인",
+    "ETH": "이더리움",
+    "XRP": "리플",
+    "DOGE": "도지코인",
+    "SOL": "솔라나",
+    "ADA": "에이다",
+    "AVAX": "아발란체",
+    "LINK": "체인링크",
+    "DOT": "폴카닷",
+    "TRX": "트론",
+    "WLD": "월드코인",
+    "QKC": "쿼크체인",
+    "DOOD": "두들즈",
+    "SOPH": "소폰",
+    "MTL": "메탈",
+    "STEEM": "스팀",
+    "XEC": "이캐시",
+    "AERO": "에어로",
+    "PENDLE": "펜들",
+    "KNC": "카이버네트워크",
+    "VET": "비체인",
+    "STX": "스택스",
+    "SUI": "수이",
+    "APT": "앱토스",
+    "ARB": "아비트럼",
+    "OP": "옵티미즘",
+    "NEAR": "니어프로토콜",
+    "ATOM": "코스모스",
+    "ETC": "이더리움 클래식",
+    "BCH": "비트코인캐시",
+    "LTC": "라이트코인",
+    "EOS": "이오스",
+    "IMX": "이뮤터블엑스",
+    "INJ": "인젝티브",
+    "PEPE": "페페",
+    "BONK": "봉크",
+    "WIF": "도그위프햇",
+    "SHIB": "시바이누",
+    "HBAR": "헤데라",
+    "ONDO": "온도파이낸스",
+    "RENDER": "렌더토큰",
+}
+
 try:
-    for item in pyupbit.get_market_all():
-        market = item.get("market", "")
-        if market.startswith("KRW-"):
-            code = market.replace("KRW-", "")
-            COIN_NAMES[code] = item.get("korean_name", code)
+    market_items = pyupbit.get_market_all(fiat="KRW")
+    if market_items:
+        for item in market_items:
+            market = str(item.get("market", ""))
+            korean_name = str(item.get("korean_name", "")).strip()
+            if market.startswith("KRW-") and korean_name:
+                code = market.replace("KRW-", "")
+                COIN_NAMES[code] = korean_name
 except Exception:
-    COIN_NAMES = {}
+    pass
 
 def coin_label(code):
+    code = str(code).replace("KRW-", "").strip()
     return f"{COIN_NAMES.get(code, code)} ({code})"
 coins = st.multiselect("분석 코인", AVAILABLE_COINS, default=AVAILABLE_COINS)
 refresh = st.button("🔄 지금 분석")
