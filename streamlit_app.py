@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import upbit_swing
+import pyupbit
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
 
@@ -16,6 +17,20 @@ if not AVAILABLE_COINS:
     st.stop()
 upbit_swing.COINS = AVAILABLE_COINS
 st.caption(f"분석 대상: KRW 전체 마켓 중 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
+
+# 업비트 코인 코드와 한글명 매칭
+COIN_NAMES = {}
+try:
+    for item in pyupbit.get_market_all(fiat="KRW"):
+        market = item.get("market", "")
+        if market.startswith("KRW-"):
+            code = market.replace("KRW-", "")
+            COIN_NAMES[code] = item.get("korean_name", code)
+except Exception:
+    COIN_NAMES = {}
+
+def coin_label(code):
+    return f"{COIN_NAMES.get(code, code)} ({code})"
 coins = st.multiselect("분석 코인", AVAILABLE_COINS, default=AVAILABLE_COINS)
 refresh = st.button("🔄 지금 분석")
 
@@ -27,7 +42,7 @@ def get_results(selected):
             if r:
                 results.append(r)
         except Exception as e:
-            st.warning(f"{coin} 분석 오류: {e}")
+            st.warning(f"{coin_label(coin)} 분석 오류: {e}")
     return sorted(results, key=lambda x: x["total_score"], reverse=True)
 
 if refresh or True:
@@ -49,7 +64,7 @@ if refresh or True:
         col = cols[i % len(cols)]
         with col:
             st.metric(
-                f"{r['coin']} · {r['total_score']}점",
+                f"{coin_label(r['coin'])} · {r['total_score']}점",
                 upbit_swing.krw(r['price'])
             )
             st.caption(r["decision"])
@@ -61,7 +76,7 @@ if refresh or True:
     for i, r in enumerate(results, 1):
         rows.append({
             "순위": i,
-            "코인": r["coin"],
+            "코인": coin_label(r["coin"]),
             "점수": r["total_score"],
             "4H": r["score4"],
             "1H": r["score1"],
@@ -81,7 +96,7 @@ if refresh or True:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     for r in results:
-        with st.expander(f"{r['coin']} · {r['decision']} · {r['total_score']}점", expanded=True):
+        with st.expander(f"{coin_label(r['coin'])} · {r['decision']} · {r['total_score']}점", expanded=True):
             a, b, c, d = st.columns(4)
             a.metric("현재가", upbit_swing.krw(r["price"]))
             b.metric("기준 진입가", upbit_swing.krw(r["entry_price"]))
