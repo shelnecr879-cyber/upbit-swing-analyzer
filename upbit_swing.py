@@ -2,6 +2,7 @@ import pyupbit
 import pandas as pd
 import numpy as np
 import time
+import requests
 from datetime import datetime
 
 # ============================================================
@@ -14,14 +15,42 @@ from datetime import datetime
 #   눌림매수 우선
 #   추격매수 방지
 #
-# 대상: WLD / QKC / DOOD / SOPH
+# 대상: 업비트 KRW 전체 마켓 중 24시간 거래대금 기준 통과 코인
 # 목표: 3~10일 보유 / 주 1~2회 정도의 선별 매매
 #
 # 주의:
 #   이 프로그램은 자동매매가 아니라 기술적 분석 보조 도구입니다.
 # ============================================================
 
-COINS = ["WLD", "QKC", "DOOD", "SOPH"]
+# 업비트 KRW 전체 마켓 중 24시간 거래대금 기준으로 유동성 낮은 코인 제외
+MIN_24H_TRADE_VALUE = 1_000_000_000  # 10억원
+COINS = []
+
+def get_liquid_krw_coins(min_trade_value=MIN_24H_TRADE_VALUE):
+    """업비트 KRW 전체 마켓에서 24시간 거래대금 기준으로 코인을 선별."""
+    try:
+        markets = pyupbit.get_tickers(fiat="KRW")
+        if not markets:
+            return []
+        result = []
+        for i in range(0, len(markets), 100):
+            batch = markets[i:i+100]
+            response = requests.get(
+                "https://api.upbit.com/v1/ticker",
+                params={"markets": ",".join(batch)},
+                timeout=15,
+            )
+            response.raise_for_status()
+            for item in response.json():
+                value = float(item.get("acc_trade_price_24h") or 0)
+                if value >= min_trade_value:
+                    result.append(item["market"].replace("KRW-", ""))
+            time.sleep(0.12)
+        return result
+    except Exception as e:
+        print(f"거래대금 기준 코인 목록 조회 실패: {e}")
+        return []
+
 
 CANDLE_4H = 200
 CANDLE_1H = 300
@@ -832,6 +861,8 @@ def analyze_coin(coin):
 # ============================================================
 
 def run_analysis():
+    global COINS
+    COINS = get_liquid_krw_coins()
     print("\n")
     print("=" * 78)
     print("        업비트 4H + 1H 스윙 분석기")

@@ -8,12 +8,17 @@ st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", la
 st.title("📈 업비트 4H + 1H 스윙 분석기")
 st.caption("목표: 3~10일 보유 / 주 1~2회 선별 · KRW 시장")
 
-DEFAULT_COINS = ["WLD", "QKC", "DOOD", "SOPH"]
-AVAILABLE_COINS = list(getattr(upbit_swing, "COINS", DEFAULT_COINS))
+MIN_TRADE_VALUE = 1_000_000_000
+with st.spinner("업비트 KRW 전체 마켓과 거래대금을 확인하는 중입니다..."):
+    AVAILABLE_COINS = upbit_swing.get_liquid_krw_coins(MIN_TRADE_VALUE)
+if not AVAILABLE_COINS:
+    st.error("거래대금 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")
+    st.stop()
+upbit_swing.COINS = AVAILABLE_COINS
+st.caption(f"분석 대상: KRW 전체 마켓 중 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
 coins = st.multiselect("분석 코인", AVAILABLE_COINS, default=AVAILABLE_COINS)
 refresh = st.button("🔄 지금 분석")
 
-@st.cache_data(ttl=300, show_spinner=False)
 def get_results(selected):
     results = []
     for coin in selected:
