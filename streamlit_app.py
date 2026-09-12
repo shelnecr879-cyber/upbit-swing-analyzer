@@ -28,6 +28,22 @@ def level(decision):
     if '매수' in d or '관심' in d or '돌파 확인' in d: return '매수검토'
     return '관망'
 
+def safe_float(value, default=0.0):
+    try:
+        if pd.isna(value) or value is None or str(value).strip() == '':
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def safe_int(value, default=0):
+    try:
+        if pd.isna(value) or value is None or str(value).strip() == '':
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
 def current_price(coin):
     try: return float(pyupbit.get_current_price(coin) or 0)
     except Exception: return 0
@@ -73,7 +89,7 @@ tracking = []
 for _, row in h.iterrows():
     code = str(row.get('코인','')).upper().replace('KRW-','').strip()
     if not code or code == 'NAN': continue
-    buy = float(row.get('매수가',0) or 0); days = int(row.get('보유일수',0) or 0); qty = float(row.get('수량',0) or 0)
+    buy = safe_float(row.get('매수가', 0)); days = safe_int(row.get('보유일수', 0)); qty = safe_float(row.get('수량', 0))
     price = current_price('KRW-'+code)
     r = by_coin.get(code)
     if buy <= 0 or price <= 0: continue
@@ -81,8 +97,8 @@ for _, row in h.iterrows():
     status = '관망'
     action = '보유 유지'
     if r:
-        stop = float(r.get('stop',0) or 0); t1 = float(r.get('target1',0) or 0); t2 = float(r.get('target2',0) or 0)
-        support = float(r.get('daily_support',0) or r.get('support',0) or 0)
+        stop = safe_float(r.get('stop', 0)); t1 = safe_float(r.get('target1', 0)); t2 = safe_float(r.get('target2', 0))
+        support = safe_float(r.get('daily_support', 0)) or safe_float(r.get('support', 0))
         if stop and price <= stop: status, action = '매도추천', '손절선 도달 · 즉시 대응 검토'
         elif support and price < support: status, action = '매도검토', '일봉 지지선 이탈'
         elif t2 and price >= t2: status, action = '매도검토', '2차 목표가 도달 · 잔량 익절 검토'
