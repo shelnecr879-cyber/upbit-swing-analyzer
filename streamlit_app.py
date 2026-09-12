@@ -9,7 +9,20 @@ st.title("📈 업비트 4H + 1H 스윙 분석기")
 st.caption("목표: 3~10일 보유 / 주 1~2회 선별 · KRW 시장")
 st.success("🔄 사이트 접속 또는 새로고침 때마다 업비트 최신 데이터로 재분석합니다. 예약 갱신 시간은 없습니다.")
 
-coins = st.multiselect("분석 코인", upbit_swing.COINS, default=upbit_swing.COINS)
+DEFAULT_COINS = [
+    "BTC", "ETH", "XRP", "DOGE", "SOL", "ADA", "AVAX", "LINK",
+    "DOT", "TRX", "SUI", "APT", "ARB", "OP", "NEAR", "ATOM",
+    "ETC", "BCH", "LTC", "EOS", "STX", "SEI", "IMX", "INJ",
+    "PEPE", "BONK", "WIF", "SHIB", "HBAR", "ONDO", "RENDER"
+]
+
+AVAILABLE_COINS = list(getattr(upbit_swing, "COINS", DEFAULT_COINS))
+
+coins = st.multiselect(
+    "분석 코인",
+    options=AVAILABLE_COINS,
+    default=AVAILABLE_COINS
+)
 refresh = st.button("🔄 지금 분석")
 
 # 접속/새로고침 때마다 최신 업비트 데이터를 가져오도록 캐시를 사용하지 않습니다.
