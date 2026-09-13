@@ -5,89 +5,117 @@ import upbit_swing
 import pyupbit
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
+st.title("📈 업비트 5~7일 스윙 분석기")
+st.caption("KRW 시장 · 24시간 거래대금 50억원 이상 · 사이트 접속 시 최신 데이터 갱신")
 
-st.title("📈 업비트 4H + 1H 스윙 분석기")
-st.caption("목표: 3~10일 보유 / 주 1~2회 선별 · KRW 시장")
+# 거래대금 기준: 50억원
+MIN_TRADE_VALUE = 5_000_000_000
 
-MIN_TRADE_VALUE = 1_000_000_000
-with st.spinner("업비트 KRW 전체 마켓과 거래대금을 확인하는 중입니다..."):
-    AVAILABLE_COINS = upbit_swing.get_liquid_krw_coins(MIN_TRADE_VALUE)
-if not AVAILABLE_COINS:
-    st.error("거래대금 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")
-    st.stop()
-upbit_swing.COINS = AVAILABLE_COINS
-st.caption(f"분석 대상: KRW 전체 마켓 중 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
-
-# 업비트 코인 코드와 한글명 매칭
-# API 응답이 늦거나 한글명이 비어도 화면에 한글명이 나오도록 기본명을 함께 사용합니다.
+# -----------------------------
+# 코인명: 한글명 (영어 티커)
+# -----------------------------
 COIN_NAMES = {
-    "BTC": "비트코인",
-    "ETH": "이더리움",
-    "XRP": "리플",
-    "DOGE": "도지코인",
-    "SOL": "솔라나",
-    "ADA": "에이다",
-    "AVAX": "아발란체",
-    "LINK": "체인링크",
-    "DOT": "폴카닷",
-    "TRX": "트론",
-    "WLD": "월드코인",
-    "QKC": "쿼크체인",
-    "DOOD": "두들즈",
-    "SOPH": "소폰",
-    "MTL": "메탈",
-    "STEEM": "스팀",
-    "XEC": "이캐시",
-    "AERO": "에어로",
-    "PENDLE": "펜들",
-    "KNC": "카이버네트워크",
-    "VET": "비체인",
-    "STX": "스택스",
-    "SUI": "수이",
-    "APT": "앱토스",
-    "ARB": "아비트럼",
-    "OP": "옵티미즘",
-    "NEAR": "니어프로토콜",
-    "ATOM": "코스모스",
-    "ETC": "이더리움 클래식",
-    "BCH": "비트코인캐시",
-    "LTC": "라이트코인",
-    "EOS": "이오스",
-    "IMX": "이뮤터블엑스",
-    "INJ": "인젝티브",
-    "PEPE": "페페",
-    "BONK": "봉크",
-    "WIF": "도그위프햇",
-    "SHIB": "시바이누",
-    "HBAR": "헤데라",
-    "ONDO": "온도파이낸스",
-    "RENDER": "렌더토큰",
+    "BTC":"비트코인", "ETH":"이더리움", "XRP":"리플", "DOGE":"도지코인",
+    "SOL":"솔라나", "ADA":"에이다", "AVAX":"아발란체", "LINK":"체인링크",
+    "DOT":"폴카닷", "TRX":"트론", "WLD":"월드코인", "DOOD":"두들즈",
+    "PENDLE":"펜들", "KNC":"카이버네트워크", "SUI":"수이", "APT":"앱토스",
+    "ARB":"아비트럼", "OP":"옵티미즘", "NEAR":"니어프로토콜", "ATOM":"코스모스",
+    "ETC":"이더리움 클래식", "BCH":"비트코인캐시", "LTC":"라이트코인",
+    "EOS":"이오스", "IMX":"이뮤터블엑스", "INJ":"인젝티브", "PEPE":"페페",
+    "BONK":"봉크", "WIF":"도그위프햇", "SHIB":"시바이누", "HBAR":"헤데라",
+    "ONDO":"온도파이낸스", "RENDER":"렌더토큰", "ZRX":"제로엑스", "GLM":"골렘",
+    "HUNT":"헌트", "THETA":"쎄타토큰", "MLK":"밀크", "WAXP":"왁스",
+    "ZORA":"조라", "GAS":"가스"
 }
 
 try:
-    market_items = pyupbit.get_market_all(fiat="KRW")
-    if market_items:
-        for item in market_items:
-            market = str(item.get("market", ""))
-            korean_name = str(item.get("korean_name", "")).strip()
-            if market.startswith("KRW-") and korean_name:
-                code = market.replace("KRW-", "")
-                COIN_NAMES[code] = korean_name
+    for item in (pyupbit.get_market_all(fiat="KRW") or []):
+        market = str(item.get("market", ""))
+        name = str(item.get("korean_name", "")).strip()
+        if market.startswith("KRW-") and name:
+            COIN_NAMES[market.replace("KRW-", "")] = name
 except Exception:
     pass
 
 def coin_label(code):
-    """항상 한글명 (영어티커) 형식으로 표시"""
     code = str(code).replace("KRW-", "").strip()
-
-    # 분석 모듈이 이미 "ZRX (ZRX)"처럼 반환해도 티커만 추출
-    if "(" in code and ")" in code:
+    if "(" in code:
         code = code.split("(")[-1].split(")")[0].strip()
+    return f"{COIN_NAMES.get(code, code)} ({code})"
 
-    korean_name = COIN_NAMES.get(code, code)
-    return f"{korean_name} ({code})"
-coins = st.multiselect("분석 코인", AVAILABLE_COINS, default=AVAILABLE_COINS)
-refresh = st.button("🔄 지금 분석")
+# -----------------------------
+# 50억원 이상 KRW 마켓
+# -----------------------------
+with st.spinner("업비트 KRW 마켓과 거래대금을 확인하는 중입니다..."):
+    AVAILABLE_COINS = upbit_swing.get_liquid_krw_coins(MIN_TRADE_VALUE)
+
+if not AVAILABLE_COINS:
+    st.error("거래대금 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")
+    st.stop()
+
+upbit_swing.COINS = AVAILABLE_COINS
+st.caption(f"분석 대상: 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
+
+# 메인 화면에 분석 코인 목록/선택창을 노출하지 않음
+
+# -----------------------------
+# 15분봉 보조지표
+# -----------------------------
+def safe_float(v, default=0.0):
+    try:
+        if v is None or pd.isna(v):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+def add_15m_indicators(result):
+    code = str(result.get("coin", "")).replace("KRW-", "").strip()
+    market = f"KRW-{code}"
+    try:
+        df = pyupbit.get_ohlcv(market, interval="minute15", count=120)
+        if df is None or len(df) < 40:
+            return result
+        close = df["close"]
+        volume = df["volume"]
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / loss.replace(0, pd.NA)
+        rsi = (100 - (100 / (1 + rs))).fillna(50)
+        ma20 = close.rolling(20).mean()
+        std20 = close.rolling(20).std()
+        upper = ma20 + 2 * std20
+        lower = ma20 - 2 * std20
+        last = -1
+        result["rsi15"] = safe_float(rsi.iloc[last], 50)
+        result["macd15"] = safe_float(macd.iloc[last])
+        result["macd15_signal"] = safe_float(signal.iloc[last])
+        result["bb15_position"] = safe_float((close.iloc[last] - lower.iloc[last]) / (upper.iloc[last] - lower.iloc[last]), 0.5)
+        result["volume15_ratio"] = safe_float(volume.iloc[last] / volume.iloc[-21:-1].mean(), 1.0)
+        result["trend15"] = "상승" if close.iloc[last] > ma20.iloc[last] and macd.iloc[last] > signal.iloc[last] else ("하락" if close.iloc[last] < ma20.iloc[last] and macd.iloc[last] < signal.iloc[last] else "중립")
+    except Exception:
+        result.update({"rsi15": 50.0, "macd15": 0.0, "macd15_signal": 0.0, "bb15_position": 0.5, "volume15_ratio": 1.0, "trend15": "확인불가"})
+    return result
+
+# -----------------------------
+# 내부 순위: 점수는 화면에 표시하지 않음
+# 기존 분석 점수 + 15분봉 보정으로 순위 결정
+# -----------------------------
+def internal_rank_key(r):
+    base = safe_float(r.get("total_score", 0))
+    bonus = 0
+    if r.get("trend15") == "상승": bonus += 3
+    if safe_float(r.get("macd15")) > safe_float(r.get("macd15_signal")): bonus += 2
+    if 45 <= safe_float(r.get("rsi15"), 50) <= 68: bonus += 2
+    if 0.15 <= safe_float(r.get("bb15_position"), 0.5) <= 0.75: bonus += 1
+    if safe_float(r.get("volume15_ratio"), 1) >= 1.2: bonus += 2
+    if safe_float(r.get("rr1", 0)) >= 1.5: bonus += 2
+    return base + bonus
 
 def get_results(selected):
     results = []
@@ -95,99 +123,72 @@ def get_results(selected):
         try:
             r = upbit_swing.analyze_coin(coin)
             if r:
+                r = add_15m_indicators(r)
                 results.append(r)
         except Exception as e:
             st.warning(f"{coin_label(coin)} 분석 오류: {e}")
-    return sorted(results, key=lambda x: x["total_score"], reverse=True)
+    return sorted(results, key=internal_rank_key, reverse=True)
 
-if refresh or True:
-    with st.spinner("업비트 데이터를 분석하는 중입니다..."):
-        results = get_results(tuple(coins))
+with st.spinner("일봉 · 1시간봉 · 15분봉과 거래량/MACD/매물대/RSI/볼린저밴드/R:R를 분석하는 중입니다..."):
+    results = get_results(tuple(AVAILABLE_COINS))
 
-    st.caption("분석시간: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+st.caption("분석시간: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    if not results:
-        st.error("데이터를 가져오지 못했습니다.")
-        st.stop()
+if not results:
+    st.error("데이터를 가져오지 못했습니다.")
+    st.stop()
 
-    # 요약 카드
-    # 전체 코인을 가로로 펼치면 화면이 깨지므로 상위 6개만 카드로 표시합니다.
-    st.subheader("상위 스윙 후보")
-    top_results = results[:6]
-    cols = st.columns(min(len(top_results), 3))
-    for i, r in enumerate(top_results):
-        col = cols[i % len(cols)]
-        with col:
-            st.metric(
-                f"{coin_label(r['coin'])} · {r['total_score']}점",
-                upbit_swing.krw(r['price'])
-            )
-            st.caption(r["decision"])
+st.subheader("① 5~7일 스윙 상위 후보")
+for r in results[:6]:
+    st.write(f"**{coin_label(r.get('coin'))}** · {r.get('decision', '관망')} · 현재가 {upbit_swing.krw(r.get('price', 0))}")
 
-    st.divider()
-    st.subheader("전체 분석 결과")
+st.divider()
+st.subheader("② 신규 스윙 후보")
+st.caption("순위는 거래량, MACD, 매물대/지지, RSI, 볼린저밴드, R:R와 일봉·1시간봉·15분봉 흐름을 종합해 산정합니다. 점수는 표시하지 않습니다.")
 
-    rows = []
-    for i, r in enumerate(results, 1):
-        rows.append({
-            "순위": i,
-            "코인": coin_label(r["coin"]),
-            "점수": r["total_score"],
-            "4H": r["score4"],
-            "1H": r["score1"],
-            "일봉": r["daily_score"],
-            "현재가": r["price"],
-            "진입구간": f"{r['entry_low']:.4g} ~ {r['entry_high']:.4g}",
-            "손절": r["stop"],
-            "1차 목표": r["target1"],
-            "2차 목표": r["target2"],
-            "일봉 추세": "상승" if r["daily_bullish"] else "하락/중립",
-            "전고점 돌파": "확인" if r["daily_breakout"] else "없음",
-            "지지 확인": "확인" if r["daily_support_confirmed"] else "대기",
-            "고점 추격 위험": "제외" if r["daily_overextended"] else "정상",
-            "1H 추세": "상승 확인" if r["one_hour_bullish"] else ("하락 확인" if r["one_hour_bearish"] else "중립"),
-            "추천": r["decision"],
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+rows = []
+for i, r in enumerate(results, 1):
+    rows.append({
+        "순위": i,
+        "코인": coin_label(r.get("coin")),
+        "추천": r.get("decision", "관망"),
+        "일봉": "상승" if r.get("daily_bullish", False) else "하락/중립",
+        "1시간봉": "상승" if r.get("one_hour_bullish", False) else ("하락" if r.get("one_hour_bearish", False) else "중립"),
+        "15분봉": r.get("trend15", "확인불가"),
+        "거래량": f"{safe_float(r.get('volume15_ratio', 1)):.2f}배",
+        "MACD": "상승" if safe_float(r.get("macd15")) > safe_float(r.get("macd15_signal")) else "하락/중립",
+        "RSI": f"{safe_float(r.get('rsi15'), 50):.1f}",
+        "볼린저밴드": f"{safe_float(r.get('bb15_position'), .5) * 100:.0f}%",
+        "매물대/지지": "확인" if r.get("daily_support_confirmed", False) else "대기",
+        "R:R": f"{safe_float(r.get('rr1')):.2f}",
+        "현재가": r.get("price", 0),
+        "진입구간": f"{safe_float(r.get('entry_low')):.4g} ~ {safe_float(r.get('entry_high')):.4g}",
+        "손절": r.get("stop", 0),
+        "1차 목표": r.get("target1", 0),
+        "2차 목표": r.get("target2", 0),
+    })
 
-    for r in results:
-        with st.expander(f"{coin_label(r['coin'])} · {r['decision']} · {r['total_score']}점", expanded=True):
-            a, b, c, d = st.columns(4)
-            a.metric("현재가", upbit_swing.krw(r["price"]))
-            b.metric("기준 진입가", upbit_swing.krw(r["entry_price"]))
-            c.metric("손절", upbit_swing.krw(r["stop"]), f"{r['risk_pct']:+.1f}%")
-            d.metric("1H 거래량", f"{r['volume_ratio']:.2f}배")
+st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            st.write(f"**진입 관심구간:** {upbit_swing.krw(r['entry_low'])} ~ {upbit_swing.krw(r['entry_high'])}")
-            st.write(f"**목표:** 1차 {upbit_swing.krw(r['target1'])} / 2차 {upbit_swing.krw(r['target2'])}")
-            st.write(f"**R:R:** 1차 {r['rr1']:.2f} / 2차 {r['rr2']:.2f}")
-            st.markdown("### 일봉 필터")
-            st.write(f"**일봉 추세:** {'상승' if r['daily_bullish'] else '하락/중립'}")
-            st.write(f"**거래량 동반 전고점 돌파:** {'확인' if r['daily_breakout'] else '없음'}")
-            st.write(f"**돌파 후 지지 확인:** {'확인' if r['daily_support_confirmed'] else '대기'}")
-            st.write(f"**급등 후 고점 추격 위험:** {'추천 제외' if r['daily_overextended'] else '없음'}")
-            st.write(f"**일봉 거래량:** {r['daily_volume_ratio']:.2f}배")
-            st.write(f"**전고점 기준:** {upbit_swing.krw(r['daily_prior_high'])}")
+st.divider()
+st.subheader("③ 코인별 상세 분석")
+for r in results:
+    with st.expander(f"{coin_label(r.get('coin'))} · {r.get('decision', '관망')}", expanded=False):
+        a, b, c, d = st.columns(4)
+        a.metric("현재가", upbit_swing.krw(r.get("price", 0)))
+        b.metric("기준 진입가", upbit_swing.krw(r.get("entry_price", 0)))
+        c.metric("손절", upbit_swing.krw(r.get("stop", 0)))
+        d.metric("1차 R:R", f"{safe_float(r.get('rr1')):.2f}")
+        st.write(f"**일봉:** {'상승' if r.get('daily_bullish', False) else '하락/중립'}")
+        st.write(f"**1시간봉:** {'상승' if r.get('one_hour_bullish', False) else ('하락' if r.get('one_hour_bearish', False) else '중립')}")
+        st.write(f"**15분봉:** {r.get('trend15', '확인불가')}")
+        st.write(f"**15분봉 RSI:** {safe_float(r.get('rsi15'), 50):.1f}")
+        st.write(f"**15분봉 MACD:** {safe_float(r.get('macd15')):.6g} / Signal {safe_float(r.get('macd15_signal')):.6g}")
+        st.write(f"**15분봉 거래량:** {safe_float(r.get('volume15_ratio'), 1):.2f}배")
+        st.write(f"**볼린저밴드 위치:** {safe_float(r.get('bb15_position'), .5) * 100:.0f}%")
+        st.write(f"**전고점 돌파:** {'확인' if r.get('daily_breakout', False) else '없음'}")
+        st.write(f"**돌파 후 지지:** {'확인' if r.get('daily_support_confirmed', False) else '대기'}")
+        st.write(f"**진입 관심구간:** {upbit_swing.krw(r.get('entry_low', 0))} ~ {upbit_swing.krw(r.get('entry_high', 0))}")
+        st.write(f"**목표:** 1차 {upbit_swing.krw(r.get('target1', 0))} / 2차 {upbit_swing.krw(r.get('target2', 0))}")
 
-            st.markdown("### 1H 추세 확인")
-            if r["one_hour_bullish"]:
-                st.success("상승 추세 확인 — 매수 조건을 검토할 수 있습니다.")
-            elif r["one_hour_bearish"]:
-                st.error("하락 추세 확인 — 보유 중이면 매도/비중축소를 검토합니다.")
-            else:
-                st.warning("1H 상승 추세가 아직 확인되지 않았습니다. 신규 매수는 기다립니다.")
-
-            st.markdown("### 4H / 1H / 일봉 지표")
-            ind = pd.DataFrame([
-                {"항목":"RSI", "4H":r["rsi4"], "1H":r["rsi1"]},
-                {"항목":"MA20", "4H":r["ma20_4"], "1H":r["ma20_1"]},
-                {"항목":"MA60", "4H":r["ma60_4"], "1H":r["ma60_1"]},
-                {"항목":"MACD", "4H":r["macd4"], "1H":r["macd1"]},
-                {"항목":"MACD Signal", "4H":r["macd4_signal"], "1H":r["macd1_signal"]},
-                {"항목":"일봉 MA20", "4H":"", "1H":r["daily_ma20"]},
-                {"항목":"일봉 MA60", "4H":"", "1H":r["daily_ma60"]},
-                {"항목":"일봉 RSI", "4H":"", "1H":r["daily_rsi"]},
-            ])
-            st.dataframe(ind, use_container_width=True, hide_index=True)
-
-st.info("주의: 이 도구는 자동매매가 아니라 기술적 분석 보조 도구입니다. 매수/매도 추천은 규칙 기반 신호입니다.")
+st.info("주의: 본 화면은 자동매매가 아닌 기술적 분석 보조 도구입니다. 급등 코인도 지표가 양호하면 후보에 포함될 수 있지만, 손절 기준을 반드시 확인하세요.")
