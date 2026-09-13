@@ -157,19 +157,46 @@ def holding_report(result):
     }
 
 # -----------------------------
+# 10점 만점 종합 점수
+# -----------------------------
+def analysis_score(r):
+    """일봉·1시간봉·15분봉과 주요 지표를 종합한 10점 만점 점수."""
+    score = 5.0
+
+    # 추세: 일봉 2.0점, 1시간봉 1.5점, 15분봉 1.0점
+    score += 1.0 if r.get("daily_bullish", False) else -1.0 if r.get("daily_bearish", False) else 0.0
+    score += 0.75 if r.get("one_hour_bullish", False) else -0.75 if r.get("one_hour_bearish", False) else 0.0
+    score += 0.5 if r.get("trend15") == "상승" else -0.5 if r.get("trend15") == "하락" else 0.0
+
+    # MACD
+    score += 0.5 if safe_float(r.get("macd15")) > safe_float(r.get("macd15_signal")) else -0.5
+    # RSI: 45~68을 매수에 우호적으로 평가
+    rsi = safe_float(r.get("rsi15"), 50)
+    score += 0.5 if 45 <= rsi <= 68 else -0.5 if rsi < 35 or rsi > 75 else 0.0
+    # 볼린저밴드: 중단~하단 반등 구간 선호, 상단 과열 감점
+    bb = safe_float(r.get("bb15_position"), 0.5)
+    score += 0.5 if 0.15 <= bb <= 0.75 else -0.5 if bb > 0.9 else 0.0
+    # 거래량
+    vol = safe_float(r.get("volume15_ratio"), 1.0)
+    score += 0.5 if 1.2 <= vol <= 4.0 else -0.25 if vol < 0.5 else 0.0
+    # 매물대/지지 및 돌파
+    if r.get("daily_support_confirmed", False): score += 0.5
+    if r.get("daily_breakout", False): score += 0.25
+    # R:R
+    rr = safe_float(r.get("rr1"), 0.0)
+    score += 0.5 if rr >= 2.0 else 0.25 if rr >= 1.5 else -0.5 if rr < 1.0 else 0.0
+    # 급등/고점 위험은 완전 제외하지 않고 감점만 적용
+    if r.get("daily_overextended", False): score -= 0.5
+
+    return round(max(0.0, min(10.0, score)), 1)
+
+# -----------------------------
 # 내부 순위: 점수는 화면에 표시하지 않음
 # 기존 분석 점수 + 15분봉 보정으로 순위 결정
 # -----------------------------
 def internal_rank_key(r):
-    base = safe_float(r.get("total_score", 0))
-    bonus = 0
-    if r.get("trend15") == "상승": bonus += 3
-    if safe_float(r.get("macd15")) > safe_float(r.get("macd15_signal")): bonus += 2
-    if 45 <= safe_float(r.get("rsi15"), 50) <= 68: bonus += 2
-    if 0.15 <= safe_float(r.get("bb15_position"), 0.5) <= 0.75: bonus += 1
-    if safe_float(r.get("volume15_ratio"), 1) >= 1.2: bonus += 2
-    if safe_float(r.get("rr1", 0)) >= 1.5: bonus += 2
-    return base + bonus
+    # 점수가 높은 순서. 점수는 화면에 표시함.
+    return -analysis_score(r)
 
 def get_results(selected):
     results = []
@@ -181,7 +208,7 @@ def get_results(selected):
                 results.append(r)
         except Exception as e:
             st.warning(f"{coin_label(coin)} 분석 오류: {e}")
-    return sorted(results, key=internal_rank_key, reverse=True)
+    return sorted(results, key=internal_rank_key)
 
 with st.spinner("일봉 · 1시간봉 · 15분봉과 거래량/MACD/매물대/RSI/볼린저밴드/R:R를 분석하는 중입니다..."):
     results = get_results(tuple(AVAILABLE_COINS))
@@ -208,7 +235,7 @@ if dood_result:
     a.metric("현재 평가금액", upbit_swing.krw(h["평가금액"]))
     b.metric("평가 손익", upbit_swing.krw(h["손익"]), f"{h['수익률']:+.2f}%")
     c.metric("현재가", upbit_swing.krw(h["현재가"]))
-    d.metric("분석 판정", dood_result.get("decision", "관망"))
+    d.metric("종합점수", f"{analysis_score(dood_result):.1f} / 10점")
     st.write(f"**매수가:** {HOLDING_ENTRY:.2f}원 · **수량:** {HOLDING_QTY:,}개 · **매수금액:** {upbit_swing.krw(h['매수금액'])}")
     st.write(f"**손절 기준:** {upbit_swing.krw(h['손절'])} · **1차 목표:** {upbit_swing.krw(h['1차목표'])} · **2차 목표:** {upbit_swing.krw(h['2차목표'])}")
     st.write(f"**일봉:** {'상승' if dood_result.get('daily_bullish', False) else '하락/중립'} · **1시간봉:** {'상승' if dood_result.get('one_hour_bullish', False) else ('하락' if dood_result.get('one_hour_bearish', False) else '중립')} · **15분봉:** {dood_result.get('trend15', '확인불가')}")
@@ -226,20 +253,20 @@ if not results:
     st.error("데이터를 가져오지 못했습니다.")
     st.stop()
 
-st.subheader("① 5~7일 스윙 상위 후보")
+st.subheader("① 5~7일 매수추천 우선 순위")
 for r in results[:6]:
-    st.write(f"**{coin_label(r.get('coin'))}** · {r.get('decision', '관망')} · 현재가 {upbit_swing.krw(r.get('price', 0))}")
+    st.write(f"**{coin_label(r.get('coin'))}** · **{analysis_score(r):.1f}점 / 10점** · 현재가 {upbit_swing.krw(r.get('price', 0))}")
 
 st.divider()
 st.subheader("② 신규 스윙 후보")
-st.caption("순위는 거래량, MACD, 매물대/지지, RSI, 볼린저밴드, R:R와 일봉·1시간봉·15분봉 흐름을 종합해 산정합니다. 점수는 표시하지 않습니다.")
+st.caption("10점 만점 종합점수(소수점 1자리)로 정렬합니다. 거래량·MACD·매물대/지지·RSI·볼린저밴드·R:R와 일봉·1시간봉·15분봉을 종합합니다.")
 
 rows = []
 for i, r in enumerate(results, 1):
     rows.append({
         "순위": i,
         "코인": coin_label(r.get("coin")),
-        "추천": r.get("decision", "관망"),
+        "점수(10점)": f"{analysis_score(r):.1f}",
         "일봉": "상승" if r.get("daily_bullish", False) else "하락/중립",
         "1시간봉": "상승" if r.get("one_hour_bullish", False) else ("하락" if r.get("one_hour_bearish", False) else "중립"),
         "15분봉": r.get("trend15", "확인불가"),
@@ -261,7 +288,7 @@ st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 st.divider()
 st.subheader("③ 코인별 상세 분석")
 for r in results:
-    with st.expander(f"{coin_label(r.get('coin'))} · {r.get('decision', '관망')}", expanded=False):
+    with st.expander(f"{coin_label(r.get('coin'))} · {analysis_score(r):.1f}점 / 10점", expanded=False):
         a, b, c, d = st.columns(4)
         a.metric("현재가", upbit_swing.krw(r.get("price", 0)))
         b.metric("기준 진입가", upbit_swing.krw(r.get("entry_price", 0)))
