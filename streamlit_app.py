@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import upbit_swing
 import pyupbit
+import requests
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
 st.title("📈 업비트 5~7일 스윙 분석기")
@@ -25,17 +26,43 @@ COIN_NAMES = {
     "BONK":"봉크", "WIF":"도그위프햇", "SHIB":"시바이누", "HBAR":"헤데라",
     "ONDO":"온도파이낸스", "RENDER":"렌더토큰", "ZRX":"제로엑스", "GLM":"골렘",
     "HUNT":"헌트", "THETA":"쎄타토큰", "MLK":"밀크", "WAXP":"왁스",
-    "ZORA":"조라", "GAS":"가스"
+    "ZORA":"조라", "GAS":"가스",
+    "ARK":"아크", "CVC":"시빅", "WLFI":"월드 리버티 파이낸셜",
+    "POWR":"파워렛저", "PLUME":"플룸", "IOST":"아이오에스티",
+    "MTL":"메탈", "CHZ":"칠리즈", "ETHFI":"이더파이",
+    "XPL":"플라즈마", "BERA":"베라체인", "POLYX":"폴리매쉬",
+    "SC":"시아코인", "HIVE":"하이브", "STEEM":"스팀",
+    "FLOCK":"플록", "USDT":"테더", "BLAST":"블라스트",
+    "LSK":"리스크", "PUNDIX":"펀디엑스", "TREE":"트리",
+    "XLM":"스텔라루멘", "SOPH":"소폰", "MET2":"메테오라",
+    "VTHO":"비토르토큰", "RAY":"레이디움", "TRUMP":"오피셜트럼프",
+    "B3":"비쓰리", "WAVES":"웨이브", "STORJ":"스토리지",
+    "UP2":"업투", "NEO":"네오", "QTUM":"퀀텀", "AAVE":"에이브",
+    "ALGO":"알고랜드", "SAND":"샌드박스", "MANA":"디센트럴랜드"
 }
 
 try:
-    for item in (pyupbit.get_market_all(fiat="KRW") or []):
+    # pyupbit 실패 시에도 직접 Upbit 공개 API로 한글명을 보완
+    response = requests.get(
+        "https://api.upbit.com/v1/market/all",
+        params={"isDetails": "false"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    for item in response.json():
         market = str(item.get("market", ""))
         name = str(item.get("korean_name", "")).strip()
         if market.startswith("KRW-") and name:
             COIN_NAMES[market.replace("KRW-", "")] = name
 except Exception:
-    pass
+    try:
+        for item in (pyupbit.get_market_all(fiat="KRW") or []):
+            market = str(item.get("market", ""))
+            name = str(item.get("korean_name", "")).strip()
+            if market.startswith("KRW-") and name:
+                COIN_NAMES[market.replace("KRW-", "")] = name
+    except Exception:
+        pass
 
 def coin_label(code):
     code = str(code).replace("KRW-", "").strip()
@@ -53,6 +80,8 @@ if not AVAILABLE_COINS:
     st.error("거래대금 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")
     st.stop()
 
+if "DOOD" not in AVAILABLE_COINS:
+    AVAILABLE_COINS = list(AVAILABLE_COINS) + ["DOOD"]
 upbit_swing.COINS = AVAILABLE_COINS
 st.caption(f"분석 대상: 24시간 거래대금 {MIN_TRADE_VALUE:,}원 이상 · {len(AVAILABLE_COINS)}개")
 
@@ -102,6 +131,31 @@ def add_15m_indicators(result):
         result.update({"rsi15": 50.0, "macd15": 0.0, "macd15_signal": 0.0, "bb15_position": 0.5, "volume15_ratio": 1.0, "trend15": "확인불가"})
     return result
 
+
+
+# -----------------------------
+# 보유 코인: 두들즈(DOOD)
+# -----------------------------
+HOLDING_COIN = "DOOD"
+HOLDING_ENTRY = 2.57
+HOLDING_QTY = 3_000_000
+
+def holding_report(result):
+    price = safe_float(result.get("price", 0))
+    invested = HOLDING_ENTRY * HOLDING_QTY
+    value = price * HOLDING_QTY
+    pnl = value - invested
+    pnl_pct = (price / HOLDING_ENTRY - 1) * 100 if HOLDING_ENTRY else 0
+    stop = safe_float(result.get("stop", 0))
+    target1 = safe_float(result.get("target1", 0))
+    target2 = safe_float(result.get("target2", 0))
+    support = safe_float(result.get("daily_prior_high", 0))
+    return {
+        "현재가": price, "매수금액": invested, "평가금액": value,
+        "손익": pnl, "수익률": pnl_pct, "손절": stop,
+        "1차목표": target1, "2차목표": target2, "지지참고": support
+    }
+
 # -----------------------------
 # 내부 순위: 점수는 화면에 표시하지 않음
 # 기존 분석 점수 + 15분봉 보정으로 순위 결정
@@ -133,6 +187,40 @@ with st.spinner("일봉 · 1시간봉 · 15분봉과 거래량/MACD/매물대/RS
     results = get_results(tuple(AVAILABLE_COINS))
 
 st.caption("분석시간: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+# 보유 중인 두들즈는 거래대금 필터와 관계없이 별도 진단
+dood_result = next((x for x in results if str(x.get("coin", "")).replace("KRW-", "") == "DOOD"), None)
+if dood_result is None:
+    try:
+        dood_result = upbit_swing.analyze_coin("DOOD")
+        if dood_result:
+            dood_result = add_15m_indicators(dood_result)
+    except Exception as e:
+        dood_result = None
+        st.warning(f"두들즈 보유 진단 오류: {e}")
+
+if dood_result:
+    st.divider()
+    st.subheader("🔎 현재 보유 코인 진단 · 두들즈 (DOOD)")
+    st.caption("입력된 보유정보: 매수가 2.57원 · 수량 3,000,000개 · 매수금액 7,710,000원")
+    h = holding_report(dood_result)
+    a, b, c, d = st.columns(4)
+    a.metric("현재 평가금액", upbit_swing.krw(h["평가금액"]))
+    b.metric("평가 손익", upbit_swing.krw(h["손익"]), f"{h['수익률']:+.2f}%")
+    c.metric("현재가", upbit_swing.krw(h["현재가"]))
+    d.metric("분석 판정", dood_result.get("decision", "관망"))
+    st.write(f"**매수가:** {HOLDING_ENTRY:.2f}원 · **수량:** {HOLDING_QTY:,}개 · **매수금액:** {upbit_swing.krw(h['매수금액'])}")
+    st.write(f"**손절 기준:** {upbit_swing.krw(h['손절'])} · **1차 목표:** {upbit_swing.krw(h['1차목표'])} · **2차 목표:** {upbit_swing.krw(h['2차목표'])}")
+    st.write(f"**일봉:** {'상승' if dood_result.get('daily_bullish', False) else '하락/중립'} · **1시간봉:** {'상승' if dood_result.get('one_hour_bullish', False) else ('하락' if dood_result.get('one_hour_bearish', False) else '중립')} · **15분봉:** {dood_result.get('trend15', '확인불가')}")
+    st.write(f"**RSI(15분):** {safe_float(dood_result.get('rsi15'), 50):.1f} · **거래량:** {safe_float(dood_result.get('volume15_ratio'), 1):.2f}배 · **R:R:** {safe_float(dood_result.get('rr1')):.2f}")
+    if h["현재가"] <= h["손절"] and h["손절"] > 0:
+        st.error("⚠️ 현재가가 분석 손절선 이하입니다. 매도/비중축소를 즉시 검토하세요.")
+    elif h["수익률"] < -10:
+        st.warning("⚠️ 보유 손실률이 -10%보다 큽니다. 반등 기대만으로 추가매수하지 말고 일봉 지지 이탈 여부를 확인하세요.")
+    elif h["현재가"] >= h["1차목표"] and h["1차목표"] > 0:
+        st.success("1차 목표 도달 구간입니다. 일부 익절을 검토할 수 있습니다.")
+    else:
+        st.info("현재 보유 진단은 실시간 가격과 일봉·1시간봉·15분봉 지표를 기준으로 갱신됩니다. '정확한 예측'이 아니라 조건 기반 위험 진단입니다.")
 
 if not results:
     st.error("데이터를 가져오지 못했습니다.")
