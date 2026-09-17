@@ -1164,3 +1164,63 @@ if __name__ == "__main__":
             print(e)
 
         time.sleep(3600)
+
+# ============================================================
+# V3.4.5 추가 기능: ATR 손절 / BTC 위험 / 호가·체결 불균형
+# ============================================================
+def calculate_atr(df, period=14):
+    d = df.copy()
+    prev_close = d['close'].shift(1)
+    tr = pd.concat([
+        d['high'] - d['low'],
+        (d['high'] - prev_close).abs(),
+        (d['low'] - prev_close).abs()
+    ], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
+
+def get_atr_stop(market, entry_price, support=0.0, period=14):
+    try:
+        df = pyupbit.get_ohlcv(market, interval='minute60', count=100)
+        if df is None or len(df) < period + 5:
+            return max(0.0, entry_price * (1 - DEFAULT_STOP)), 0.0
+        atr = float(calculate_atr(df, period).iloc[-1])
+        atr_pct = atr / entry_price if entry_price else 0.0
+        # ATR 1.5배와 지지선 하단 2%를 비교하되 과도한 손절폭 제한
+        atr_stop = entry_price - 1.5 * atr
+        support_stop = support * 0.98 if support else 0.0
+        stop = max(atr_stop, support_stop, entry_price * (1 - 0.12))
+        stop = min(stop, entry_price * (1 - 0.025))
+        return float(stop), float(atr_pct * 100)
+    except Exception:
+        return max(0.0, entry_price * (1 - DEFAULT_STOP)), 0.0
+
+def get_orderbook_metrics(market):
+    try:
+        ob = pyupbit.get_orderbook(ticker=market)
+        if isinstance(ob, list): ob = ob[0]
+        units = ob.get('orderbook_units', []) if isinstance(ob, dict) else []
+        if not units: return {'spread_pct': None, 'imbalance': None}
+        best_ask = float(units[0].get('ask_price', 0))
+        best_bid = float(units[0].get('bid_price', 0))
+        ask_size = sum(float(x.get('ask_size', 0)) for x in units[:10])
+        bid_size = sum(float(x.get('bid_size', 0)) for x in units[:10])
+        mid = (best_ask + best_bid) / 2 if best_ask and best_bid else 0
+        spread = ((best_ask - best_bid) / mid * 100) if mid else None
+        imbalance = ((bid_size - ask_size) / (bid_size + ask_size) * 100) if (bid_size + ask_size) else None
+        return {'spread_pct': spread, 'imbalance': imbalance}
+    except Exception:
+        return {'spread_pct': None, 'imbalance': None}
+
+def get_btc_market_risk():
+    try:
+        df = pyupbit.get_ohlcv('KRW-BTC', interval='minute60', count=120)
+        if df is None or len(df) < 60: return {'risk':'확인불가','reason':'BTC 데이터 부족'}
+        close = df['close']; ma20 = close.rolling(20).mean(); ma60 = close.rolling(60).mean()
+        change6 = (float(close.iloc[-1]) / float(close.iloc[-7]) - 1) * 100
+        change24 = (float(close.iloc[-1]) / float(close.iloc[-25]) - 1) * 100
+        if change6 <= -3 or change24 <= -6: risk = '위험'
+        elif close.iloc[-1] < ma20.iloc[-1] < ma60.iloc[-1] or change6 < -1.5: risk = '주의'
+        else: risk = '안정'
+        return {'risk':risk, 'reason':f'BTC 6시간 {change6:+.1f}% / 24시간 {change24:+.1f}%'}
+    except Exception:
+        return {'risk':'확인불가','reason':'BTC 위험도 조회 실패'}
