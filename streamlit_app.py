@@ -6,6 +6,14 @@ import pyupbit
 import requests
 import json
 from pathlib import Path
+import os
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+except Exception:
+    gspread = None
+    Credentials = None
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
 st.title("📈 업비트 5~14일 스윙 분석기")
@@ -330,6 +338,56 @@ def save_recommendation_history(results):
     except Exception:
         pass
 
+
+# -----------------------------
+# 영구 추천 이력: Google Sheets 우선, 로컬 파일 보조
+# -----------------------------
+def append_google_sheet(rows):
+    try:
+        if gspread is None or not hasattr(st, 'secrets') or 'gcp_service_account' not in st.secrets:
+            return False
+        sheet_name = st.secrets.get('GOOGLE_SHEET_NAME', 'upbit_swing_history')
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_info(dict(st.secrets['gcp_service_account']), scopes=scopes)
+        client = gspread.authorize(creds)
+        ws = client.open(sheet_name).sheet1
+        if not ws.get_all_values():
+            ws.append_row(list(rows[0].keys()))
+        for row in rows: ws.append_row([str(row.get(k,'')) for k in rows[0].keys()])
+        return True
+    except Exception as e:
+        st.warning(f'Google Sheets 저장 실패(로컬 기록은 계속됩니다): {e}')
+        return False
+
+def load_history_rows():
+    if not HISTORY_FILE.exists(): return []
+    out=[]
+    for line in HISTORY_FILE.read_text(encoding='utf-8').splitlines():
+        try: out.append(json.loads(line))
+        except Exception: pass
+    return out
+
+def evaluate_history():
+    rows=load_history_rows(); now=datetime.now(); evaluated=[]
+    for row in rows:
+        if row.get('result_14d') is not None: evaluated.append(row); continue
+        try:
+            ts=datetime.fromisoformat(row['timestamp']); age=(now-ts).total_seconds()/86400
+            if age < 5: evaluated.append(row); continue
+            market=row['coin'] if str(row['coin']).startswith('KRW-') else f"KRW-{row['coin']}"
+            ticker=pyupbit.get_current_price(market); entry=float(row.get('price') or 0)
+            if not ticker or not entry: evaluated.append(row); continue
+            ret=(float(ticker)/entry-1)*100
+            for day in (5,7,10,14):
+                if age >= day and row.get(f'result_{day}d') is None:
+                    row[f'result_{day}d']=round(ret,2)
+            evaluated.append(row)
+        except Exception: evaluated.append(row)
+    try:
+        HISTORY_FILE.write_text('\n'.join(json.dumps(x,ensure_ascii=False) for x in evaluated)+'\n',encoding='utf-8')
+    except Exception: pass
+    return evaluated
+
 def get_results(selected):
     results = []
     for coin in selected:
@@ -337,6 +395,12 @@ def get_results(selected):
             r = upbit_swing.analyze_coin(coin)
             if r:
                 r = add_15m_indicators(r)
+                market = str(r.get('coin','')) if str(r.get('coin','')).startswith('KRW-') else f"KRW-{r.get('coin','')}"
+                ob = upbit_swing.get_orderbook_metrics(market)
+                r['spread_pct'] = ob.get('spread_pct')
+                r['order_imbalance'] = ob.get('imbalance')
+                stop, atr_pct = upbit_swing.get_atr_stop(market, safe_float(r.get('entry_price') or r.get('price')), safe_float(r.get('support')))
+                r['atr_pct'] = atr_pct; r['stop_atr'] = stop
                 results.append(r)
         except Exception as e:
             st.warning(f"{coin_label(coin)} 분석 오류: {e}")
@@ -344,6 +408,10 @@ def get_results(selected):
 
 with st.spinner("일봉 · 1시간봉 · 15분봉과 거래량/MACD/매물대/RSI/볼린저밴드/R:R를 분석하는 중입니다..."):
     results = get_results(tuple(AVAILABLE_COINS))
+
+btc_risk = upbit_swing.get_btc_market_risk()
+st.info(f"BTC 시장 위험도: {btc_risk.get('risk')} · {btc_risk.get('reason')}")
+evaluated_history = evaluate_history()
 
 if "history_saved" not in st.session_state:
     save_recommendation_history(results)
@@ -392,6 +460,10 @@ for i, r in enumerate(results[:5], 1):
         "고점·저점": "상승" if r.get("high_low_rising") else "혼조",
         "변동성": f"{safe_float(r.get('volatility_1h')):.1f}%",
         "유동성위험": r.get("liquidity_risk", "확인불가"),
+        "호가간격": f"{safe_float(r.get('spread_pct')):.3f}%" if r.get('spread_pct') is not None else "확인불가",
+        "매수·매도불균형": f"{safe_float(r.get('order_imbalance')):+.1f}%" if r.get('order_imbalance') is not None else "확인불가",
+        "ATR": f"{safe_float(r.get('atr_pct')):.2f}%",
+        "ATR손절": r.get('stop_atr', 0),
     })
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -416,5 +488,19 @@ for r in results[:5]:
         st.write(f"**돌파 후 지지:** {'확인' if r.get('daily_support_confirmed', False) else '대기'}")
         st.write(f"**진입 관심구간:** {upbit_swing.krw(r.get('entry_low', 0))} ~ {upbit_swing.krw(r.get('entry_high', 0))}")
         st.write(f"**목표:** 1차 {upbit_swing.krw(r.get('target1', 0))} / 2차 {upbit_swing.krw(r.get('target2', 0))}")
+
+
+st.divider()
+st.subheader("④ 추천 이력·성과 통계")
+if evaluated_history:
+    hist_df=pd.DataFrame(evaluated_history)
+    for day in (5,7,10,14):
+        col=f"result_{day}d"
+        if col in hist_df.columns:
+            vals=pd.to_numeric(hist_df[col],errors='coerce').dropna()
+            if len(vals): st.write(f"{day}일 후 평가: {len(vals)}건 · 수익 마감 {int((vals>0).sum())}건 · 수익률 평균 {vals.mean():+.2f}%")
+    st.caption("성과 통계는 추천 이력이 충분히 쌓이고 각 평가일이 지난 뒤 의미가 생깁니다.")
+else:
+    st.caption("아직 저장된 추천 이력이 없습니다.")
 
 st.info("주의: 본 화면은 자동매매가 아닌 기술적 분석 보조 도구입니다. 급등 코인도 지표가 양호하면 후보에 포함될 수 있지만, 손절 기준을 반드시 확인하세요.")
