@@ -4,6 +4,8 @@ from datetime import datetime
 import upbit_swing
 import pyupbit
 import requests
+import json
+from pathlib import Path
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
 st.title("📈 업비트 5~14일 스윙 분석기")
@@ -162,6 +164,31 @@ def trend_text(r):
         return "하락"
     return "중립"
 
+def fmt_signed(v):
+    return f"{safe_float(v):+.1f}%"
+
+def structure_comment(r):
+    items = []
+    items.append(f"최근 3일 변동: {fmt_signed(r.get('recent_3d_change'))}")
+    items.append(f"20일 고점과 거리: {fmt_signed(r.get('distance_20d_high'))}")
+    items.append(f"고점 이후 조정폭: {fmt_signed(r.get('peak_pullback'))}")
+    items.append(f"돌파 유지 봉수: {int(safe_float(r.get('breakout_hold_bars')))}")
+    items.append(f"돌파 거래량 대비 현재: {safe_float(r.get('breakout_volume_ratio'), 1):.2f}배")
+    items.append(f"고점·저점 상승 여부: {'예' if r.get('high_low_rising') else '아니오'}")
+    items.append(f"1시간 변동성: {safe_float(r.get('volatility_1h')):.1f}% / 유동성 위험: {r.get('liquidity_risk','확인불가')}")
+    return items
+
+def make_15m_comment(r):
+    trend = r.get('trend15','확인불가')
+    vol = safe_float(r.get('volume15_ratio'), 1)
+    if trend == '상승' and vol >= 1.2:
+        return '진입 직전 반등과 거래량 증가가 확인됩니다.'
+    if trend == '하락':
+        return '15분봉 하락 중이므로 반등 확인 전 진입을 늦추는 편이 안전합니다.'
+    if vol < 0.7:
+        return '15분봉 거래량이 약해 확실한 진입 신호로 보기 어렵습니다.'
+    return '15분봉은 중립 구간으로, 지지 재돌파와 거래량 증가를 추가 확인해야 합니다.'
+
 def make_review_comment(r):
     """상위 후보별 사람이 읽기 쉬운 검토 코멘트 생성."""
     p = safe_float(r.get("price"))
@@ -235,6 +262,12 @@ def make_review_comment(r):
 - 손절선: {price(stop)}
 - 1차 목표: {price(target1)} / 2차 목표: {price(target2)}
 
+**15분봉 진입 확인**
+- {make_15m_comment(r)}
+
+**급등·고점·유동성 점검**
+- {"\n- ".join(structure_comment(r))}
+
 **검토 코멘트**
 - {action}
 - 주의사항: {risk_text}
@@ -284,6 +317,19 @@ def internal_rank_key(r):
     # 내부 정렬용 점수이며 화면에는 표시하지 않음.
     return -analysis_score(r)
 
+HISTORY_FILE = Path(__file__).with_name("recommendation_history.jsonl")
+
+def save_recommendation_history(results):
+    """추천 당시 가격과 핵심 변수를 한 줄씩 저장합니다."""
+    try:
+        with HISTORY_FILE.open("a", encoding="utf-8") as f:
+            now = datetime.now().isoformat(timespec="seconds")
+            for r in results[:5]:
+                row = {"timestamp": now, "coin": r.get("coin"), "decision": r.get("decision"), "price": safe_float(r.get("price")), "entry_low": safe_float(r.get("entry_low")), "entry_high": safe_float(r.get("entry_high")), "stop": safe_float(r.get("stop")), "target1": safe_float(r.get("target1")), "target2": safe_float(r.get("target2")), "recent_3d_change": safe_float(r.get("recent_3d_change")), "distance_20d_high": safe_float(r.get("distance_20d_high")), "peak_pullback": safe_float(r.get("peak_pullback")), "volatility_1h": safe_float(r.get("volatility_1h")), "liquidity_risk": r.get("liquidity_risk") }
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 def get_results(selected):
     results = []
     for coin in selected:
@@ -298,6 +344,10 @@ def get_results(selected):
 
 with st.spinner("일봉 · 1시간봉 · 15분봉과 거래량/MACD/매물대/RSI/볼린저밴드/R:R를 분석하는 중입니다..."):
     results = get_results(tuple(AVAILABLE_COINS))
+
+if "history_saved" not in st.session_state:
+    save_recommendation_history(results)
+    st.session_state["history_saved"] = True
 
 st.caption("분석시간: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -334,6 +384,14 @@ for i, r in enumerate(results[:5], 1):
         "손절": r.get("stop", 0),
         "1차 목표": r.get("target1", 0),
         "2차 목표": r.get("target2", 0),
+        "최근3일": fmt_signed(r.get("recent_3d_change")),
+        "20일고점 거리": fmt_signed(r.get("distance_20d_high")),
+        "고점조정폭": fmt_signed(r.get("peak_pullback")),
+        "돌파유지": int(safe_float(r.get("breakout_hold_bars"))),
+        "돌파대비 거래량": f"{safe_float(r.get('breakout_volume_ratio'),1):.2f}배",
+        "고점·저점": "상승" if r.get("high_low_rising") else "혼조",
+        "변동성": f"{safe_float(r.get('volatility_1h')):.1f}%",
+        "유동성위험": r.get("liquidity_risk", "확인불가"),
     })
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
