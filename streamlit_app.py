@@ -6,7 +6,7 @@ import pyupbit
 import requests
 
 st.set_page_config(page_title="업비트 스윙 분석기", page_icon="📈", layout="wide")
-st.title("📈 업비트 5~7일 스윙 분석기")
+st.title("📈 업비트 5~14일 스윙 분석기")
 st.caption("KRW 시장 · 24시간 거래대금 50억원 이상 · 사이트 접속 시 최신 데이터 갱신")
 
 # 거래대금 기준: 50억원
@@ -149,8 +149,101 @@ def add_15m_indicators(result):
 
 
 
+def pct(v):
+    return f"{safe_float(v):.1f}%"
+
+def price(v):
+    return upbit_swing.krw(safe_float(v))
+
+def trend_text(r):
+    if r.get("daily_bullish", False):
+        return "상승"
+    if r.get("daily_bearish", False):
+        return "하락"
+    return "중립"
+
+def make_review_comment(r):
+    """상위 후보별 사람이 읽기 쉬운 검토 코멘트 생성."""
+    p = safe_float(r.get("price"))
+    support = safe_float(r.get("support"))
+    resistance = safe_float(r.get("resistance"))
+    entry_low = safe_float(r.get("entry_low"))
+    entry_high = safe_float(r.get("entry_high"))
+    stop = safe_float(r.get("stop"))
+    target1 = safe_float(r.get("target1"))
+    target2 = safe_float(r.get("target2"))
+    decision = r.get("decision", "관망")
+    daily = trend_text(r)
+    one_hour = "상승" if r.get("one_hour_bullish", False) else ("하락" if r.get("one_hour_bearish", False) else "중립")
+    trend15 = r.get("trend15", "확인불가")
+    reasons = []
+    risks = []
+
+    if r.get("daily_breakout", False):
+        if r.get("daily_support_confirmed", False):
+            reasons.append("전고점 돌파 후 지지 확인")
+        else:
+            risks.append("전고점 돌파 후 지지 확인이 아직 부족")
+    if r.get("daily_overextended", False):
+        risks.append("최근 급등·고점 추격 위험")
+    if r.get("one_hour_bullish", False):
+        reasons.append("1시간봉 상승 구조")
+    elif r.get("one_hour_bearish", False):
+        risks.append("1시간봉 하락 구조")
+    if trend15 == "상승":
+        reasons.append("15분봉 단기 반등")
+    elif trend15 == "하락":
+        risks.append("15분봉 단기 약세")
+    if safe_float(r.get("volume15_ratio"), 1) >= 1.2:
+        reasons.append(f"단기 거래량 {safe_float(r.get('volume15_ratio')):.2f}배")
+    if p > 0 and support > 0:
+        dist = (p-support)/support*100
+        if dist <= 3:
+            reasons.append(f"지지선과 거리 약 {dist:.1f}%")
+        elif dist >= 8:
+            risks.append(f"지지선과 거리 약 {dist:.1f}%")
+    if resistance > 0 and p > 0:
+        rd = (resistance-p)/p*100
+        if rd <= 3:
+            risks.append(f"저항선까지 약 {rd:.1f}%로 여유가 적음")
+
+    reason_text = " · ".join(reasons) if reasons else "뚜렷한 상승 확인 신호가 제한적"
+    risk_text = " · ".join(risks) if risks else "특별히 확인되는 단기 위험 신호는 제한적"
+    if decision == "매수추천":
+        action = "조건 충족 시 분할 진입을 검토할 수 있으나, 손절선을 반드시 지켜야 합니다."
+    elif decision == "매수검토":
+        action = "현재가 즉시 추격매수보다 지지 확인 후 분할 진입을 검토하는 구간입니다."
+    elif decision == "매도추천":
+        action = "하락 구조가 확인되는 상태이므로 신규매수보다 리스크 관리가 우선입니다."
+    elif decision == "매도검토":
+        action = "지지선 이탈 여부를 우선 확인하고 보유 중이라면 비중 조절을 검토합니다."
+    else:
+        action = "현재는 확인 매매가 필요하며, 주요 지지선 또는 저항선 돌파 전 추격매수는 주의합니다."
+
+    return f"""**판단: {decision}**
+
+**차트 특징**
+- 일봉 추세: {daily}
+- 1시간봉: {one_hour}
+- 15분봉: {trend15}
+- 주요 확인사항: {reason_text}
+
+**중요 가격**
+- 지지선: {price(support)}
+- 저항선: {price(resistance)}
+- 진입 관심구간: {price(entry_low)} ~ {price(entry_high)}
+- 손절선: {price(stop)}
+- 1차 목표: {price(target1)} / 2차 목표: {price(target2)}
+
+**검토 코멘트**
+- {action}
+- 주의사항: {risk_text}
+- 손익비(R:R): {safe_float(r.get('rr1')):.2f}
+"""
+
+
 # -----------------------------
-# 10점 만점 종합 점수
+# 내부 분석 점수 (화면에는 표시하지 않음)
 # -----------------------------
 def analysis_score(r):
     """일봉·1시간봉·15분봉과 주요 지표를 종합한 10점 만점 점수."""
@@ -188,7 +281,7 @@ def analysis_score(r):
 # 기존 분석 점수 + 15분봉 보정으로 순위 결정
 # -----------------------------
 def internal_rank_key(r):
-    # 점수가 높은 순서. 점수는 화면에 표시함.
+    # 내부 정렬용 점수이며 화면에는 표시하지 않음.
     return -analysis_score(r)
 
 def get_results(selected):
@@ -212,20 +305,21 @@ if not results:
     st.error("데이터를 가져오지 못했습니다.")
     st.stop()
 
-st.subheader("① 5~7일 매수추천 우선 순위")
-for r in results[:6]:
-    st.write(f"**{coin_label(r.get('coin'))}** · **{analysis_score(r):.1f}점 / 10점** · 현재가 {upbit_swing.krw(r.get('price', 0))}")
+st.subheader("① 상위 5개 스윙 후보")
+st.caption("내부 정렬 결과 상위 5개만 상세 결과와 검토 코멘트를 표시합니다.")
+for i, r in enumerate(results[:5], 1):
+    with st.expander(f"{i}위 · {coin_label(r.get('coin'))} · {r.get('decision', '관망')}", expanded=(i == 1)):
+        st.markdown(make_review_comment(r))
 
 st.divider()
 st.subheader("② 신규 스윙 후보")
-st.caption("10점 만점 종합점수(소수점 1자리)로 정렬합니다. 거래량·MACD·매물대/지지·RSI·볼린저밴드·R:R와 일봉·1시간봉·15분봉을 종합합니다.")
+st.caption("4H·1H·15m·일봉·거래량·MACD·매물대/지지·RSI·볼린저밴드·R:R를 종합해 행동 기준을 표시합니다.")
 
 rows = []
-for i, r in enumerate(results, 1):
+for i, r in enumerate(results[:5], 1):
     rows.append({
         "순위": i,
         "코인": coin_label(r.get("coin")),
-        "점수(10점)": f"{analysis_score(r):.1f}",
         "일봉": "상승" if r.get("daily_bullish", False) else "하락/중립",
         "1시간봉": "상승" if r.get("one_hour_bullish", False) else ("하락" if r.get("one_hour_bearish", False) else "중립"),
         "15분봉": r.get("trend15", "확인불가"),
@@ -245,9 +339,9 @@ for i, r in enumerate(results, 1):
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 st.divider()
-st.subheader("③ 코인별 상세 분석")
-for r in results:
-    with st.expander(f"{coin_label(r.get('coin'))} · {analysis_score(r):.1f}점 / 10점", expanded=False):
+st.subheader("③ 상위 5개 코인별 상세 분석")
+for r in results[:5]:
+    with st.expander(f"{coin_label(r.get('coin'))} · {r.get('decision', '관망')}", expanded=False):
         a, b, c, d = st.columns(4)
         a.metric("현재가", upbit_swing.krw(r.get("price", 0)))
         b.metric("기준 진입가", upbit_swing.krw(r.get("entry_price", 0)))
