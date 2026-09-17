@@ -16,7 +16,7 @@ from datetime import datetime
 #   추격매수 방지
 #
 # 대상: 업비트 KRW 전체 마켓 중 24시간 거래대금 기준 통과 코인
-# 목표: 3~10일 보유 / 주 1~2회 정도의 선별 매매
+# 목표: 5~14일 보유 / 주 1~2회 정도의 선별 매매
 #
 # 주의:
 #   이 프로그램은 자동매매가 아니라 기술적 분석 보조 도구입니다.
@@ -558,6 +558,40 @@ def make_entry_zone(price, ma20, zone_low, zone_high, recent_low):
 # 최종 코인 분석
 # ============================================================
 
+
+def _safe_pct(a, b):
+    try:
+        return (float(a) / float(b) - 1.0) * 100.0 if float(b) else 0.0
+    except Exception:
+        return 0.0
+
+def analyze_market_structure(df1, dfD, price):
+    """추가 리스크/유동성/급등 후 고점 진단."""
+    out = {}
+    try:
+        d = dfD.copy()
+        h20 = float(d["high"].tail(20).max())
+        h60 = float(d["high"].tail(60).max())
+        out["recent_3d_change"] = _safe_pct(float(d["close"].iloc[-1]), float(d["close"].iloc[-4])) if len(d) >= 4 else 0.0
+        out["distance_20d_high"] = _safe_pct(float(price), h20)
+        out["distance_60d_high"] = _safe_pct(float(price), h60)
+        peak = float(d["high"].tail(20).max())
+        out["peak_pullback"] = _safe_pct(float(price), peak)
+        recent = d.tail(10)
+        first_half, second_half = recent.iloc[:5], recent.iloc[5:]
+        out["high_low_rising"] = bool(second_half["high"].max() > first_half["high"].max() and second_half["low"].min() > first_half["low"].min())
+        prior_high = float(d["high"].iloc[-21:-1].max()) if len(d) >= 22 else h20
+        breakout_rows = d[d["close"] > prior_high]
+        out["breakout_hold_bars"] = int(len(breakout_rows))
+        out["breakout_volume_ratio"] = float(d["volume"].iloc[-1] / max(float(d["volume"].tail(20).iloc[:-1].mean()), 1e-12))
+        ret = df1["close"].pct_change().dropna().tail(48)
+        out["volatility_1h"] = float(ret.std() * (48 ** 0.5) * 100) if len(ret) > 5 else 0.0
+        out["volume_stability"] = float(df1["volume"].tail(12).mean() / max(float(df1["volume"].tail(48).mean()), 1e-12))
+        out["liquidity_risk"] = "높음" if out["volatility_1h"] >= 12 or out["volume_stability"] < 0.45 else ("보통" if out["volatility_1h"] >= 7 or out["volume_stability"] < 0.7 else "낮음")
+    except Exception:
+        out.update({"recent_3d_change":0.0,"distance_20d_high":0.0,"distance_60d_high":0.0,"peak_pullback":0.0,"high_low_rising":False,"breakout_hold_bars":0,"breakout_volume_ratio":1.0,"volatility_1h":0.0,"volume_stability":1.0,"liquidity_risk":"확인불가"})
+    return out
+
 def analyze_coin(coin):
     ticker = "KRW-" + coin
 
@@ -590,6 +624,7 @@ def analyze_coin(coin):
     aD = analyze_daily(dfD)
 
     price = a1["price"]
+    structure = analyze_market_structure(df1, dfD, price)
 
     total_score = a4["score"] + a1["score"] + aD["score"]
 
@@ -742,26 +777,26 @@ def analyze_coin(coin):
     # 최종 상태
     # --------------------------------------------------------
     if sell_confirmed:
-        decision = "매도 추천 - 1H 하락 확인"
+        decision = "매도추천"
     elif daily_blocked:
-        decision = "추천 제외 - 일봉 하락/급등 고점"
+        decision = "매수검토"
     elif not four_hour_bullish:
-        decision = "관망 - 4H 추세 확인 필요"
+        decision = "관망"
     elif chase_blocked:
-        decision = "추격매수 금지 - 눌림 대기"
+        decision = "매수검토"
     elif aD["breakout"] and not aD["support_confirmed"]:
-        decision = "돌파 확인 - 지지 재확인 대기"
+        decision = "매수검토"
     elif buy_confirmed:
-        decision = "매수 후보 - 일봉·돌파·지지 확인"
+        decision = "매수추천"
     elif total_score >= 12:
         if not one_hour_bullish:
-            decision = "관심 - 1H 확인 후 매수"
+            decision = "매수검토"
         else:
-            decision = "관심 - 눌림 확인"
+            decision = "매수검토"
     elif total_score >= 8:
         decision = "관망"
     else:
-        decision = "매수 금지"
+        decision = "관망"
 
     # --------------------------------------------------------
     # 현재가가 진입구간 안에 들어왔는지
@@ -779,9 +814,9 @@ def analyze_coin(coin):
     # --------------------------------------------------------
 
     if total_score >= 13:
-        holding = "3~7일"
+        holding = "5~7일"
     elif total_score >= 10:
-        holding = "4~10일"
+        holding = "7~14일"
     else:
         holding = "관망"
 
@@ -806,6 +841,7 @@ def analyze_coin(coin):
         "daily_ma20": aD["ma20"],
         "daily_ma60": aD["ma60"],
         "daily_reasons": aD["reasons"],
+        **structure,
 
         "rsi4": a4["rsi"],
         "rsi1": a1["rsi"],
@@ -866,7 +902,7 @@ def run_analysis():
     print("\n")
     print("=" * 78)
     print("        업비트 4H + 1H 스윙 분석기")
-    print("        목표 : 3~10일 보유 / 주 1~2회 선별")
+    print("        목표 : 5~14일 보유 / 주 1~2회 선별")
     print("=" * 78)
 
     now = datetime.now()
